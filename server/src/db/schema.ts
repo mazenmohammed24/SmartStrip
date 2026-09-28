@@ -1,0 +1,183 @@
+import type {
+  ApplianceProfileName,
+  ConnectivityState,
+  EnergyUnit,
+  EventCause,
+  NotificationSeverity,
+  RelayStateValue,
+  ThemePreference,
+  TimeFormat,
+} from '../../../shared/types.js';
+
+// Storage-level shapes for lowdb. These are intentionally separate from the
+// shared DTOs: they hold internal-only fields (password hashes, driver ids)
+// that must never be sent to the client as-is.
+
+export interface StoredUser {
+  id: string;
+  username: string;
+  passwordHash: string;
+  createdAt: string;
+  lastLoginAt: string | null;
+}
+
+export interface StoredStrip {
+  id: string;
+  name: string;
+  model: string;
+  location: string | null;
+  driverName: string;
+  driverStripId: string;
+  ipAddress: string | null;
+  connectivity: ConnectivityState;
+  order: number;
+  addedAt: string;
+  icon?: ApplianceProfileName;
+}
+
+export interface StoredRelay {
+  id: string;
+  stripId: string;
+  index: number;
+  name: string;
+  state: RelayStateValue;
+  icon: ApplianceProfileName;
+  lastChangedAt: string;
+}
+
+export interface StoredSchedule {
+  id: string;
+  name: string;
+  stripId: string;
+  relayIndex: number | null;
+  action: RelayStateValue;
+  time: string;
+  daysOfWeek: number[];
+  enabled: boolean;
+  lastFiredAt: string | null;
+  createdAt: string;
+}
+
+export interface StoredRelayTimer {
+  stripId: string;
+  relayIndex: number;
+  mode: 'for' | 'after';
+  state: RelayStateValue;
+  restoreState: RelayStateValue | null;
+  restoreAt: string;
+  createdAt: string;
+}
+
+export interface StoredNotification {
+  id: string;
+  type: 'relay-changed' | 'schedule-fired' | 'overload' | 'offline' | 'online' | 'system';
+  title: string;
+  body: string;
+  severity: NotificationSeverity;
+  relatedStripId: string | null;
+  relatedStripMac: string | null; // MAC address for rename resilience
+  relatedRelayIndex: number | null;
+  createdAt: string;
+  readAt: string | null;
+}
+
+export interface StoredPushSubscription {
+  id: string;
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+  userAgent: string | null;
+  createdAt: string;
+}
+
+export interface StoredSettings {
+  theme: ThemePreference;
+  accentColor: string;
+  energyUnit: EnergyUnit;
+  currency: string;
+  ratePerKwh: number;
+  overloadThresholdWatts: number;
+  timeFormat: TimeFormat;
+}
+
+export interface MainDbSchema {
+  users: StoredUser[];
+  strips: StoredStrip[];
+  relays: StoredRelay[];
+  schedules: StoredSchedule[];
+  relayTimers: StoredRelayTimer[];
+  notifications: StoredNotification[];
+  pushSubscriptions: StoredPushSubscription[];
+  settings: StoredSettings;
+  voltraTokens?: {
+    accessToken: string;
+    refreshToken: string;
+    expiresAt: string | null;
+  };
+}
+
+export const defaultSettings: StoredSettings = {
+  theme: 'system',
+  accentColor: '#0f766e',
+  energyUnit: 'kWh',
+  currency: 'USD',
+  ratePerKwh: 0.16,
+  overloadThresholdWatts: 1800,
+  timeFormat: '24h',
+};
+
+export const defaultMainDb: MainDbSchema = {
+  users: [],
+  strips: [],
+  relays: [],
+  schedules: [],
+  relayTimers: [],
+  notifications: [],
+  pushSubscriptions: [],
+  settings: defaultSettings,
+};
+
+export interface StoredEvent {
+  id: string;
+  type:
+  | 'relay-on'
+  | 'relay-off'
+  | 'schedule-fired'
+  | 'overload'
+  | 'offline'
+  | 'online'
+  | 'strip-added'
+  | 'strip-removed';
+  stripId: string | null;
+  stripName: string | null;
+  driverStripId: string | null; // MAC address / serial - stable identifier for rename resilience
+  relayIndex: number | null;
+  message: string;
+  cause: EventCause;
+  createdAt: string;
+}
+
+export interface EventsDbSchema {
+  events: StoredEvent[];
+}
+
+export const defaultEventsDb: EventsDbSchema = { events: [] };
+
+export type PowerResolution = 'minute' | 'hour' | 'day';
+
+export interface StoredPowerSample {
+  id: string;
+  stripId: string;
+  relayIndex: number;
+  resolution: PowerResolution;
+  bucketStart: string;
+  avgW: number;
+  minW: number;
+  maxW: number;
+  kwh: number;
+}
+
+export interface PowerDbSchema {
+  samples: StoredPowerSample[];
+}
+
+export const defaultPowerDb: PowerDbSchema = { samples: [] };
