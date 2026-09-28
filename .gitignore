@@ -1,10 +1,38 @@
+# Dependencies and build output
 node_modules/
 dist/
 build/
-.env
-server/data/*.json
+dev-dist/
+
+# Runtime state, rebuilt on first run
+server/data/
 !server/data/.gitkeep
+
+# Logs, captures and scratch files, by extension
 *.log
+*.tmp
+*.bak
+*.backup
+*.orig
+*.rej
+*.har
+*.swp
+*.swo
+*~
+Thumbs.db
+desktop.ini
 .DS_Store
-web/dev-dist/
-.playwright-mcp/*
+
+# Secrets and local overrides
+.env
+.env.*
+*.pem
+*.key
+
+# Editor and agent tooling
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.iml
+.kilo/
+.playwright-mcp/
