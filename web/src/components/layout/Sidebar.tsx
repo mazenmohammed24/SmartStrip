@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react';
-import { LogOut, Zap } from 'lucide-react';
+import { Zap } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
-import { useAuthStore } from '../../store/authStore';
 import { useNotificationStore } from '../../store/notificationStore';
 import { PRIMARY_NAV, SECONDARY_NAV, type NavItem } from './navConfig';
 
@@ -29,7 +28,6 @@ function NavGroup({ label, items, unread }: { label: string; items: NavItem[]; u
 
 export function Sidebar() {
   const unread = useNotificationStore((s) => s.unreadCount());
-  const logout = useAuthStore((s) => s.logout);
 
   return (
     <aside className="sticky top-0 flex h-screen w-60 shrink-0 flex-col border-r border-border bg-surface px-3 py-4">
@@ -40,16 +38,6 @@ export function Sidebar() {
       <NavGroup label="Fleet" items={[PRIMARY_NAV[0], SECONDARY_NAV[1]]} unread={unread} />
       <NavGroup label="Insights" items={[PRIMARY_NAV[1], SECONDARY_NAV[0]]} unread={unread} />
       <NavGroup label="Control" items={[PRIMARY_NAV[2], PRIMARY_NAV[3], SECONDARY_NAV[2]]} unread={unread} />
-      <div className="mt-auto">
-        <button
-          type="button"
-          onClick={() => void logout()}
-          className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-text-muted hover:bg-surface-hover"
-        >
-          <LogOut size={18} strokeWidth={1.8} />
-          Log out
-        </button>
-      </div>
     </aside>
   );
 }

@@ -9,14 +9,13 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server/src/index.js",
     "generate-vapid-keys": "node scripts/generate-vapid-keys.mjs",
-    "seed-demo-history": "tsx scripts/seed-demo-history.ts"
+    "seed-demo-history": "tsx scripts/seed-demo-history.ts",
+    "mttl-selftest": "tsx scripts/mttl-selftest.ts",
+    "mttl-provision": "tsx scripts/mttl-provision.ts"
   },
   "dependencies": {
-    "bcryptjs": "^3.0.3",
-    "cookie-parser": "^1.4.7",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "jsonwebtoken": "^9.0.3",
     "lowdb": "^7.0.1",
     "nanoid": "^6.0.1",
     "web-push": "^3.6.7",
@@ -24,10 +23,7 @@
     "zod": "^4.6.1"
   },
   "devDependencies": {
-    "@types/bcryptjs": "^2.4.6",
-    "@types/cookie-parser": "^1.4.10",
     "@types/express": "^5.0.6",
-    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.20.2",
     "@types/web-push": "^3.6.4",
     "@types/ws": "^8.18.1",

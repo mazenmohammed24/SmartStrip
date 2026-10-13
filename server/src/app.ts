@@ -1,11 +1,10 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import cookieParser from 'cookie-parser';
 import express, { type Express } from 'express';
-import { authRoutes } from './auth/authRoutes.js';
 import { env } from './config/env.js';
 import { eventsRoutes } from './routes/eventsRoutes.js';
 import { healthRoutes } from './routes/healthRoutes.js';
+import { mttlRoutes } from './routes/mttlRoutes.js';
 import { notificationsRoutes } from './routes/notificationsRoutes.js';
 import { powerRoutes } from './routes/powerRoutes.js';
 import { pushRoutes } from './routes/pushRoutes.js';
@@ -18,9 +17,7 @@ const thisDir = path.dirname(fileURLToPath(import.meta.url));
 export function createApp(): Express {
   const app = express();
   app.use(express.json());
-  app.use(cookieParser());
 
-  app.use('/api/auth', authRoutes);
   app.use('/api/strips', stripsRoutes);
   app.use('/api/power', powerRoutes);
   app.use('/api/events', eventsRoutes);
@@ -29,6 +26,7 @@ export function createApp(): Express {
   app.use('/api/push', pushRoutes);
   app.use('/api/settings', settingsRoutes);
   app.use('/api/health', healthRoutes);
+  app.use('/api/mttl', mttlRoutes);
 
   if (env.isProduction) {
     // server/dist/server/src/app.js -> ../../../../web/dist

@@ -1,9 +1,7 @@
-import { Router } from 'express';
-import { requireAuth } from '../auth/authMiddleware.js';
+﻿import { Router } from 'express';
 import { listNotifications, markAllRead, markRead, removeNotification } from '../services/notificationService.js';
 
 export const notificationsRoutes = Router();
-notificationsRoutes.use(requireAuth);
 
 notificationsRoutes.get('/', (req, res) => {
   const unreadOnly = req.query.unreadOnly === 'true';

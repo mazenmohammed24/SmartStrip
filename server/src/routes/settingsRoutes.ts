@@ -1,11 +1,9 @@
-import { Router } from 'express';
+﻿import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth } from '../auth/authMiddleware.js';
 import { getSettings, updateSettings } from '../services/settingsService.js';
 import { voltraTokenManager } from '../drivers/voltra/tokenManager.js';
 
 export const settingsRoutes = Router();
-settingsRoutes.use(requireAuth);
 
 settingsRoutes.get('/', (_req, res) => {
   res.json({ settings: getSettings() });

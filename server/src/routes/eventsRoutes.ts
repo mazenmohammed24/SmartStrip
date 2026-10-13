@@ -1,9 +1,7 @@
-import { Router } from 'express';
-import { requireAuth } from '../auth/authMiddleware.js';
+﻿import { Router } from 'express';
 import { listEvents } from '../services/eventService.js';
 
 export const eventsRoutes = Router();
-eventsRoutes.use(requireAuth);
 
 eventsRoutes.get('/', (req, res) => {
   const stripId = req.query.stripId ? String(req.query.stripId) : undefined;

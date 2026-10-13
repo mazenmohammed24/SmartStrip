@@ -39,6 +39,12 @@
     <string name="field_host">عنوان IP أو اسم السيرفر</string>
     <string name="field_port">المنفذ</string>
     <string name="field_token">الـ Token</string>
+    <string name="field_server_ip_for_strip">عنوان السيرفر للمشترك</string>
+    <string name="field_wifi_ssid">اسم شبكة البيت</string>
+    <string name="field_wifi_password">كلمة مرور شبكة البيت</string>
+    <string name="provision_title">إعداد وتسجيل المشترك</string>
+    <string name="provision_body">حط المشترك في وضع الإعداد، ووصل الموبايل بشبكة TONLY_TAP_*، وبعدها ابعت بيانات واي فاي البيت وعنوان السيرفر. التطبيق هيستنى المشترك يتصل بسيرفرنا ويسجله.</string>
+    <string name="provision_and_register">إعداد وتسجيل</string>
     <string name="save">حفظ</string>
     <string name="test">اختبار</string>
     <string name="saved">اتحفظ</string>

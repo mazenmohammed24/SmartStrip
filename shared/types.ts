@@ -51,6 +51,57 @@ export interface DiscoveredStripDTO {
   signalStrength?: number;
 }
 
+export interface MttlOutletTelemetry {
+  relayIndex: number;
+  on: boolean;
+  watts: number;
+  energyKwh: number;
+  temperatureC: number;
+}
+
+/**
+ * Live hardware readings for one strip. Only the MTTL-W01 driver produces these;
+ * every other driver reports nothing here and the UI hides the panel.
+ */
+export interface MttlStripTelemetry {
+  driverStripId: string;
+  model: string;
+  fw: string;
+  ip: string;
+  connectivity: ConnectivityState;
+  voltageV: number | null;
+  currentA: number | null;
+  rssi: number | null;
+  totalWatts: number;
+  totalEnergyKwh: number;
+  outlets: MttlOutletTelemetry[];
+}
+
+/** Telemetry for a single strip, as served by `GET /api/mttl/strips/:driverStripId`. */
+export interface MttlStripTelemetryResponse {
+  /** The fleet id, or null if this strip is not adopted yet. */
+  stripId: string | null;
+  driverStripId: string;
+  /** Null if this server has never seen a strip with that id. */
+  telemetry: MttlStripTelemetry | null;
+}
+
+export interface MttlStatusResponse {
+  devicePort: number;
+  setupHost: string;
+  setupPort: number;
+  advertisedIp: string;
+  localIps: string[];
+  strips: MttlStripTelemetry[];
+}
+
+export interface MttlProvisionResponse {
+  ok: boolean;
+  ipReply: string;
+  connectReply: string;
+  message: string;
+}
+
 export interface EventDTO {
   id: string;
   type:
@@ -139,13 +190,6 @@ export interface PowerSummaryResponse {
   todayCost: number;
   currency: string;
   liveWatts: number;
-}
-
-export interface UserPublicDTO {
-  id: string;
-  username: string;
-  createdAt: string;
-  lastLoginAt: string | null;
 }
 
 // ---- WebSocket message shapes (server -> client) ----

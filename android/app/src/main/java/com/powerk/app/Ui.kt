@@ -744,6 +744,12 @@ private fun SettingsScreen() {
     var status by remember { mutableStateOf<String?>(null) }
     var statusOk by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
+    var provisionIp by remember { mutableStateOf(host) }
+    var provisionSsid by remember { mutableStateOf("") }
+    var provisionPassword by remember { mutableStateOf("") }
+    var provisionStatus by remember { mutableStateOf<String?>(null) }
+    var provisionOk by remember { mutableStateOf(false) }
+    var provisionBusy by remember { mutableStateOf(false) }
     var lang by remember { mutableStateOf(Lang.code) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -892,6 +898,75 @@ private fun SettingsScreen() {
         }
 
         ElevatedCard(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text(
+                    stringResource(R.string.provision_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    stringResource(R.string.provision_body),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    OutlinedTextField(
+                        value = provisionIp,
+                        onValueChange = { provisionIp = it },
+                        label = { Text(stringResource(R.string.field_server_ip_for_strip)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = provisionSsid,
+                        onValueChange = { provisionSsid = it },
+                        label = { Text(stringResource(R.string.field_wifi_ssid)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = provisionPassword,
+                        onValueChange = { provisionPassword = it },
+                        label = { Text(stringResource(R.string.field_wifi_password)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                Button(
+                    enabled = Server.configured && !provisionBusy,
+                    onClick = {
+                        commit()
+                        provisionBusy = true
+                        provisionStatus = null
+                        scope.launch {
+                            try {
+                                val result = Api.provisionAndRegister(Server.base, Server.token, provisionIp.trim(), provisionSsid.trim(), provisionPassword)
+                                provisionStatus = result.message
+                                provisionOk = result.registered
+                            } catch (e: Exception) {
+                                provisionStatus = e.message ?: "provisioning failed"
+                                provisionOk = false
+                            }
+                            provisionBusy = false
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(stringResource(R.string.provision_and_register)) }
+                if (provisionBusy) CircularWavyProgressIndicator(Modifier.fillMaxWidth())
+                AnimatedVisibility(visible = provisionStatus != null, enter = fadeIn(), exit = fadeOut()) {
+                    Surface(
+                        shape = MaterialTheme.shapes.medium,
+                        color = if (provisionOk) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer,
+                        contentColor = if (provisionOk) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(provisionStatus ?: "", Modifier.padding(14.dp), style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+        }
+
+        ElevatedCard(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
                     stringResource(R.string.setup_title),
@@ -903,7 +978,7 @@ private fun SettingsScreen() {
                 SetupStep(3, stringResource(R.string.setup_step_3))
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                     Text(
-                        "python powerk.py provision --ip <ip> --ssid WIFI --password PW",
+                        "Use Provision & register above from a phone joined to TONLY_TAP_*",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(start = 30.dp),

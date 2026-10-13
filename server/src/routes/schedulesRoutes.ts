@@ -1,12 +1,10 @@
-import { Router } from 'express';
+﻿import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth } from '../auth/authMiddleware.js';
 import * as scheduleService from '../services/scheduleService.js';
 import { fireSchedule } from '../scheduler/scheduleRunner.js';
 import { getDriver } from '../drivers/DriverRegistry.js';
 
 export const schedulesRoutes = Router();
-schedulesRoutes.use(requireAuth);
 
 schedulesRoutes.get('/', (_req, res) => {
   res.json({ schedules: scheduleService.listSchedules() });

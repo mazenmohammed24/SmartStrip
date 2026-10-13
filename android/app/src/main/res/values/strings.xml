@@ -17,7 +17,7 @@
     <string name="connecting">Connecting to %1$s…</string>
 
     <string name="no_server_title">No server set</string>
-    <string name="no_server_body">Point powerk at the machine running powerk.py — your PC, a Raspberry Pi or a VPS.</string>
+    <string name="no_server_body">Point powerk at the machine running your SmartStrip server — your PC, a Raspberry Pi or a VPS.</string>
     <string name="no_strip_title">No strip connected</string>
     <string name="no_strip_body">The strip dials the server itself. Check that it is powered, on a 2.4 GHz Wi-Fi network and provisioned with the server\'s IP.</string>
     <string name="open_settings">Open settings</string>
@@ -35,10 +35,16 @@
 
     <string name="settings_title">Settings</string>
     <string name="server_title">Server</string>
-    <string name="server_body">Where powerk.py runs: your PC, a Raspberry Pi or a VPS. Add the token if the server is reachable from the internet.</string>
+    <string name="server_body">Where your SmartStrip server runs: your PC, a Raspberry Pi or a VPS. Add the token if the server is reachable from the internet.</string>
     <string name="field_host">Server IP or host</string>
     <string name="field_port">Port</string>
     <string name="field_token">Token</string>
+    <string name="field_server_ip_for_strip">Server IP for strip</string>
+    <string name="field_wifi_ssid">Home Wi-Fi name</string>
+    <string name="field_wifi_password">Home Wi-Fi password</string>
+    <string name="provision_title">Provision &amp; register strip</string>
+    <string name="provision_body">Put the strip in setup mode, join this phone to TONLY_TAP_*, then send your home Wi-Fi and this server IP. The app will wait for the strip to call our API server and register it.</string>
+    <string name="provision_and_register">Provision &amp; register</string>
     <string name="save">Save</string>
     <string name="test">Test</string>
     <string name="saved">Saved</string>
@@ -52,7 +58,7 @@
     <string name="command_failed">Command failed</string>
 
     <string name="setup_title">First-time setup</string>
-    <string name="setup_step_1">Run powerk.py on the machine that stays on, and note the IP it prints.</string>
+    <string name="setup_step_1">Run the SmartStrip server on the machine that stays on, and note the IP it prints.</string>
     <string name="setup_step_2">Enter that IP, port and token here, then press Test.</string>
     <string name="setup_step_3">Point the strip at that machine once:</string>
     <string name="setup_step_4">Done — the strip connects on its own. No router DNS or port forwarding.</string>

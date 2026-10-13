@@ -3,7 +3,6 @@ import { Button } from '../components/ui/Button';
 import { Card, CardBody } from '../components/ui/Card';
 import { Input, Label, Select } from '../components/ui/Input';
 import { api } from '../lib/apiClient';
-import { useAuthStore } from '../store/authStore';
 import { useSettingsStore } from '../store/settingsStore';
 
 const ACCENT_PRESETS = ['#0f766e', '#16803c', '#176f91', '#7c3aed', '#c2410c', '#be123c'];
@@ -12,11 +11,7 @@ export default function SettingsPage() {
   const settings = useSettingsStore((s) => s.settings);
   const fetchSettings = useSettingsStore((s) => s.fetchSettings);
   const updateSettings = useSettingsStore((s) => s.updateSettings);
-  const user = useAuthStore((s) => s.user);
 
-  const [currentPassword, setCurrentPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [passwordMsg, setPasswordMsg] = useState<string | null>(null);
   const [pushTestMsg, setPushTestMsg] = useState<string | null>(null);
   const [voltraAccessToken, setVoltraAccessToken] = useState('');
   const [voltraRefreshToken, setVoltraRefreshToken] = useState('');
@@ -29,20 +24,7 @@ export default function SettingsPage() {
 
   if (!settings) return null;
 
-  const changePassword = async (e: FormEvent) => {
-    e.preventDefault();
-    setPasswordMsg(null);
-    try {
-      await api.put('/auth/password', { currentPassword, newPassword });
-      setPasswordMsg('Password updated.');
-      setCurrentPassword('');
-      setNewPassword('');
-    } catch (err) {
-      setPasswordMsg(err instanceof Error ? err.message : 'Failed to update password');
-    }
-  };
-
-  const sendTestPush = async () => {
+const sendTestPush = async () => {
     setPushTestMsg(null);
     try {
       await api.post('/push/test');
@@ -217,30 +199,7 @@ export default function SettingsPage() {
         </CardBody>
       </Card>
 
-      <Card>
-        <CardBody className="flex flex-col gap-4">
-          <h2 className="text-sm font-semibold text-text">Account</h2>
-          <p className="text-sm text-text-muted">
-            Signed in as <span className="font-medium text-text">{user?.username}</span>
-          </p>
-          <form onSubmit={changePassword} className="flex flex-col gap-3 sm:max-w-sm">
-            <div>
-              <Label htmlFor="currentPassword">Current password</Label>
-              <Input id="currentPassword" type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} required />
-            </div>
-            <div>
-              <Label htmlFor="newPassword">New password</Label>
-              <Input id="newPassword" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} required minLength={8} />
-            </div>
-            {passwordMsg && <p className="text-xs text-text-muted">{passwordMsg}</p>}
-            <Button type="submit" size="sm" className="self-start">
-              Update password
-            </Button>
-          </form>
-        </CardBody>
-      </Card>
-
-      <Card>
+<Card>
         <CardBody>
           <h2 className="mb-1 text-sm font-semibold text-text">About</h2>
           <p className="text-xs text-text-muted">SmartStrip Portal · driver: mock (simulated strips) · MTTL-W01 compatible layout</p>

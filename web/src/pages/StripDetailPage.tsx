@@ -4,6 +4,8 @@ import { AllOnAllOffButtons } from '../components/strips/AllOnAllOffButtons';
 import { ConnectivityBadge } from '../components/strips/ConnectivityBadge';
 import { RelayToggle } from '../components/strips/RelayToggle';
 import { DeviceIcon, IconPicker } from '../components/strips/IconPicker';
+import { TelemetryCard } from '../components/strips/TelemetryCard';
+import { useStripTelemetry } from '../hooks/useStripTelemetry';
 import { Button } from '../components/ui/Button';
 import { Card, CardBody } from '../components/ui/Card';
 import { Input, Label } from '../components/ui/Input';
@@ -37,6 +39,8 @@ export default function StripDetailPage() {
   }, [loaded, fetchStrips]);
 
   const strip = strips.find((s) => s.id === stripId);
+  // Null unless the MTTL driver is the active one, in which case the card hides itself.
+  const telemetry = useStripTelemetry(strip?.driverStripId ?? '', 5000);
 
   if (!strip) {
     return (
@@ -96,6 +100,8 @@ export default function StripDetailPage() {
           </div>
         </CardBody>
       </Card>
+
+      <TelemetryCard telemetry={telemetry} />
 
       <div className="flex flex-col gap-2">
         <h2 className="px-1 text-sm font-semibold text-text-muted">Outlets</h2>

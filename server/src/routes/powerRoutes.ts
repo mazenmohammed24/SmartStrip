@@ -1,12 +1,10 @@
-import { Router } from 'express';
+﻿import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth } from '../auth/authMiddleware.js';
 import { getDriver } from '../drivers/DriverRegistry.js';
 import * as fleetService from '../services/fleetService.js';
 import * as powerService from '../services/powerService.js';
 
 export const powerRoutes = Router();
-powerRoutes.use(requireAuth);
 
 powerRoutes.get('/live', (_req, res) => {
   const strips = fleetService.listStrips();

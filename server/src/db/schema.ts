@@ -13,14 +13,6 @@ import type {
 // shared DTOs: they hold internal-only fields (password hashes, driver ids)
 // that must never be sent to the client as-is.
 
-export interface StoredUser {
-  id: string;
-  username: string;
-  passwordHash: string;
-  createdAt: string;
-  lastLoginAt: string | null;
-}
-
 export interface StoredStrip {
   id: string;
   name: string;
@@ -100,7 +92,6 @@ export interface StoredSettings {
 }
 
 export interface MainDbSchema {
-  users: StoredUser[];
   strips: StoredStrip[];
   relays: StoredRelay[];
   schedules: StoredSchedule[];
@@ -126,7 +117,6 @@ export const defaultSettings: StoredSettings = {
 };
 
 export const defaultMainDb: MainDbSchema = {
-  users: [],
   strips: [],
   relays: [],
   schedules: [],

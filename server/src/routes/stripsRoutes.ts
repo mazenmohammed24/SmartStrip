@@ -1,13 +1,11 @@
-import { Router } from 'express';
+﻿import { Router } from 'express';
 import { z } from 'zod';
 import { getDriver } from '../drivers/DriverRegistry.js';
-import { requireAuth } from '../auth/authMiddleware.js';
 import * as fleetService from '../services/fleetService.js';
 import * as relayTimerService from '../services/relayTimerService.js';
 import { getScan, startScan } from '../services/scanService.js';
 
 export const stripsRoutes = Router();
-stripsRoutes.use(requireAuth);
 
 stripsRoutes.get('/', (_req, res) => {
   res.json({ strips: fleetService.listStrips() });

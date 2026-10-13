@@ -10,15 +10,22 @@ const thisDir = path.dirname(fileURLToPath(import.meta.url));
 /**
  * Where the app is served from.
  *
- * Defaults to '/' so a normal build is unchanged and works standalone on its
- * own port. Set VITE_BASE_PATH=/SmartStrip/ to produce a build that also works
- * behind the Local Server Manager reverse proxy (which mounts this app at a
- * sub-path on a shared origin).
+ * Defaults to '/' so a normal build is unchanged and works standalone on its own
+ * port. Behind the Local Server Manager reverse proxy (which mounts this app at a
+ * sub-path on a shared origin) the build must use that sub-path instead, or every
+ * asset URL resolves against the manager root and the page comes up blank with a
+ * wall of 404s.
+ *
+ * `npm run build:portal` selects it via `--mode portal`, which does not depend on
+ * an exported environment variable that a fresh shell silently drops. An explicit
+ * VITE_BASE_PATH always wins.
  */
-const basePath = process.env.VITE_BASE_PATH || '/';
+const PORTAL_BASE_PATH = '/SmartStrip/';
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  const basePath = process.env.VITE_BASE_PATH || (mode === 'portal' ? PORTAL_BASE_PATH : '/');
+  return {
   base: basePath,
   plugins: [
     react(),
@@ -59,4 +66,5 @@ export default defineConfig({
       '@shared': path.resolve(thisDir, '..', 'shared'),
     },
   },
+  };
 });

@@ -1,6 +1,5 @@
-import { ChevronsLeft, LogOut, Menu } from 'lucide-react';
+import { ChevronsLeft, Menu } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
-import { useAuthStore } from '../../store/authStore';
 import { useNotificationStore } from '../../store/notificationStore';
 import { useUiStore } from '../../store/uiStore';
 import { ALL_NAV } from './navConfig';
@@ -9,7 +8,6 @@ export function SidebarRail() {
   const expanded = useUiStore((s) => s.railExpanded);
   const toggle = useUiStore((s) => s.toggleRail);
   const unread = useNotificationStore((s) => s.unreadCount());
-  const logout = useAuthStore((s) => s.logout);
 
   return (
     <aside className={`sticky top-0 flex h-screen shrink-0 flex-col border-r border-border bg-surface transition-all ${expanded ? 'w-56' : 'w-16'}`}>
@@ -41,15 +39,6 @@ export function SidebarRail() {
           </NavLink>
         ))}
       </nav>
-      <button
-        type="button"
-        onClick={() => void logout()}
-        className="m-2 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-text-muted hover:bg-surface-hover"
-        title="Log out"
-      >
-        <LogOut size={18} strokeWidth={1.8} />
-        {expanded && 'Log out'}
-      </button>
     </aside>
   );
 }

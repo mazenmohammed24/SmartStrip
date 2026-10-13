@@ -1,10 +1,8 @@
-import { Router } from 'express';
+﻿import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth } from '../auth/authMiddleware.js';
 import { getPublicKey, isPushConfigured, sendPushToAll, subscribe, unsubscribe } from '../services/pushService.js';
 
 export const pushRoutes = Router();
-pushRoutes.use(requireAuth);
 
 pushRoutes.get('/public-key', (_req, res) => {
   res.json({ publicKey: getPublicKey(), configured: isPushConfigured() });

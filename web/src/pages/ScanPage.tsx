@@ -5,9 +5,11 @@ import { Card, CardBody } from '../components/ui/Card';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Input, Label } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
+import { ProvisionCard } from '../components/strips/ProvisionCard';
 import { api } from '../lib/apiClient';
 import { onWsMessage } from '../lib/wsClient';
 import { useFleetStore } from '../store/fleetStore';
+import { useMttlStore } from '../store/mttlStore';
 
 interface ScanRecord {
   status: 'pending' | 'done' | 'error';
@@ -19,6 +21,9 @@ interface ScanRecord {
 export default function ScanPage() {
   const strips = useFleetStore((s) => s.strips);
   const adoptStrip = useFleetStore((s) => s.adoptStrip);
+  const fetchMttlStatus = useMttlStore((s) => s.fetchStatus);
+  const mttlStatus = useMttlStore((s) => s.status);
+  const mttlUnsupported = useMttlStore((s) => s.unsupported);
   const [scanning, setScanning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [discovered, setDiscovered] = useState<DiscoveredStripDTO[]>([]);
@@ -27,6 +32,10 @@ export default function ScanPage() {
   const [locationDraft, setLocationDraft] = useState('');
   const [saving, setSaving] = useState(false);
   const scanIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    void fetchMttlStatus();
+  }, [fetchMttlStatus]);
 
   useEffect(
     () =>
@@ -89,9 +98,13 @@ export default function ScanPage() {
       <Card>
         <CardBody className="flex flex-col items-center gap-3 py-8 text-center">
           <span className="text-4xl">📡</span>
-          <p className="max-w-sm text-sm text-text-muted">Scan your local network for smart strips broadcasting nearby.</p>
+          <p className="max-w-sm text-sm text-text-muted">
+            {mttlStatus
+              ? 'A strip appears here once it has dialled this server. Nothing is broadcast to scan for, so run a scan to pick up any strip that has reconnected.'
+              : 'Scan your local network for smart strips broadcasting nearby.'}
+          </p>
           <Button onClick={() => void startScan()} loading={scanning}>
-            {scanning ? 'Scanning…' : 'Scan network'}
+            {scanning ? 'Scanning…' : 'Scan for strips'}
           </Button>
           {scanning && (
             <div className="h-2 w-full max-w-xs overflow-hidden rounded-full bg-surface-alt">
@@ -102,8 +115,19 @@ export default function ScanPage() {
       </Card>
 
       {!scanning && discovered.length === 0 && (
-        <EmptyState icon={<span>🔍</span>} title="No scan results yet" description="Run a scan to discover strips on your network." />
+        <EmptyState
+          icon={<span>🔍</span>}
+          title="No strip has checked in yet"
+          description={
+            mttlStatus
+              ? 'Provision a strip below. Once it joins your Wi-Fi it will dial this server and show up here within a minute.'
+              : 'Run a scan to discover strips on your network.'
+          }
+        />
       )}
+
+      {/* Only meaningful for the direct MTTL-W01 driver, so it stays hidden otherwise. */}
+      {mttlStatus && !mttlUnsupported && <ProvisionCard />}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {discovered.map((d) => {
@@ -114,7 +138,8 @@ export default function ScanPage() {
                 <div className="min-w-0">
                   <p className="truncate font-medium text-text">{d.suggestedName}</p>
                   <p className="truncate text-xs text-text-muted">
-                    {d.model} · {d.ipAddress} · {d.relayCount} outlets · signal {d.signalStrength}%
+                    {d.model} · {d.ipAddress ?? 'address unknown'} · {d.relayCount} outlets
+                    {d.signalStrength !== undefined ? ` · signal ${d.signalStrength}%` : ''}
                   </p>
                 </div>
                 <Button size="sm" variant={adopted ? 'secondary' : 'primary'} disabled={adopted} onClick={() => openAdopt(d)}>
