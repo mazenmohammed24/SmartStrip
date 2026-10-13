@@ -27,15 +27,23 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x android/gradlew
 
-      - name: Build debug APK
-        run: cd android && ./gradlew assembleDebug --no-daemon
+      - name: Build and test debug APK
+        run: cd android && ./gradlew testDebugUnitTest assembleDebug --no-daemon
 
-      - name: Upload APK
+      - name: Version alpha APK
+        id: alpha_apk
+        shell: bash
+        run: |
+          VERSION_NAME=$(grep -oP 'versionName\\s*=\\s*"\\K[^"]+' android/app/build.gradle.kts)
+          ALPHA_VERSION="${VERSION_NAME}-alpha"
+          DEST="android/app/build/outputs/apk/debug/SmartStrip-${ALPHA_VERSION}-${GITHUB_RUN_NUMBER}.apk"
+          cp android/app/build/outputs/apk/debug/app-debug.apk "$DEST"
+          echo "path=$DEST" >> "$GITHUB_OUTPUT"
+          echo "name=SmartStrip-${ALPHA_VERSION}-${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload alpha APK
         uses: actions/upload-artifact@v4
         with:
-          name: powerk-debug
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: ${{ steps.alpha_apk.outputs.name }}
+          path: ${{ steps.alpha_apk.outputs.path }}
           retention-days: 30
-
-      - name: Run unit tests
-        run: cd android && ./gradlew test --no-daemon

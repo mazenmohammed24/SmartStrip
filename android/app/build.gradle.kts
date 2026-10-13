@@ -16,6 +16,9 @@ android {
     }
 
     buildTypes {
+        debug {
+            versionNameSuffix = "-alpha"
+        }
         release {
             isMinifyEnabled = false
         }
