@@ -29,6 +29,12 @@ desktop.ini
 *.pem
 *.key
 
+# Android build outputs and local config
+android/local.properties
+android/.gradle/
+android/app/build/
+android/build/
+
 # Editor and agent tooling
 .vscode/*
 !.vscode/extensions.json

@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">powerk</string>
+
+    <string name="tab_plugs">الفيش</string>
+    <string name="tab_settings">الإعدادات</string>
+    <string name="splash_tagline">تحكم في الكهربا من عندك</string>
+
+    <string name="strip_name">المشترك الكوري</string>
+    <string name="strip_fw">الإصدار %1$s</string>
+
+    <string name="header_no_server">مفيش سيرفر متحدد</string>
+    <string name="header_online">‏%1$d متصل · %2$s</string>
+    <string name="header_known_offline">‏%1$d معروف · مش متصل</string>
+    <string name="header_waiting">مستني المشترك · %1$s</string>
+    <string name="refresh">تحديث</string>
+    <string name="connecting">جاري الاتصال بـ %1$s…</string>
+
+    <string name="no_server_title">مفيش سيرفر متحدد</string>
+    <string name="no_server_body">وجّه powerk للجهاز اللي شغّال عليه powerk.py — كمبيوتر، Raspberry Pi أو سيرفر VPS.</string>
+    <string name="no_strip_title">مفيش مشترك متصل</string>
+    <string name="no_strip_body">المشترك بيتصل بالسيرفر لوحده. اتأكد إنه متوصل بالكهربا، وعلى واي فاي 2.4 جيجاهرتز، ومتظبط على عنوان IP بتاع السيرفر.</string>
+    <string name="open_settings">افتح الإعدادات</string>
+
+    <string name="turn_all_on">شغّلهم كلهم</string>
+    <string name="turn_all_off">اطفيهم كلهم</string>
+    <string name="outlet_n">الفيشة %1$d</string>
+    <string name="state_on">شغالة</string>
+    <string name="state_off">مقفولة</string>
+    <string name="tile_on_detail">%1$s وات · %2$d°</string>
+    <string name="tile_off_detail">%1$d° · مش واصلالها كهربا</string>
+    <string name="watts_now">دلوقتي</string>
+    <string name="unit_watts">وات</string>
+    <string name="switch_outlet">بدّل الفيشة %1$d</string>
+
+    <string name="settings_title">الإعدادات</string>
+    <string name="server_title">السيرفر</string>
+    <string name="server_body">المكان اللي شغّال عليه powerk.py: كمبيوتر، Raspberry Pi أو سيرفر VPS. ضيف الـ Token لو السيرفر متاح من على الإنترنت.</string>
+    <string name="field_host">عنوان IP أو اسم السيرفر</string>
+    <string name="field_port">المنفذ</string>
+    <string name="field_token">الـ Token</string>
+    <string name="save">حفظ</string>
+    <string name="test">اختبار</string>
+    <string name="saved">اتحفظ</string>
+    <string name="connected_summary">متصل · %1$d مشترك، %2$d متصل</string>
+    <string name="open_web_ui">افتح الواجهة في المتصفح</string>
+
+    <string name="language_title">اللغة</string>
+    <string name="lang_system">تلقائي</string>
+    <string name="lang_english">English</string>
+    <string name="lang_arabic">العربية</string>
+    <string name="command_failed">الأمر فشل</string>
+
+    <string name="setup_title">الإعداد لأول مرة</string>
+    <string name="setup_step_1">شغّل powerk.py على الجهاز اللي هيفضل شغّال، وسجّل عنوان الـ IP اللي هيظهرلك.</string>
+    <string name="setup_step_2">اكتب العنوان والمنفذ والـ Token هنا، وبعد كده دوس اختبار.</string>
+    <string name="setup_step_3">وجّه المشترك للجهاز ده مرة واحدة:</string>
+    <string name="setup_step_4">كده خلصنا — المشترك هيتصل لوحده. مش محتاج تغيّر DNS الراوتر ولا تفتح أي منافذ.</string>
+    <string name="setup_footer">تطبيق الأندرويد بيستخدم نفس واجهة JSON اللي بتستخدمها واجهة الويب.</string>
+</resources>
