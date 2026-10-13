@@ -10,43 +10,51 @@ import android.os.Build
 import android.os.LocaleList
 import androidx.annotation.RequiresApi
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import java.util.Locale
 
-/** Server address (PC / Raspberry / VPS running powerk.py), persisted in SharedPreferences. */
+private const val DEFAULT_SERVER_URL = "https://notes-thinking-amendment-charitable.trycloudflare.com"
+
+/** Server URL (full https/http URL to the SmartStrip server), persisted in SharedPreferences. */
 object Server {
     private var prefs: SharedPreferences? = null
 
-    var host by mutableStateOf("")
-        private set
-    var port by mutableIntStateOf(8080)
+    /** Full base URL, e.g. https://xyz.trycloudflare.com or http://192.168.1.10:4001 */
+    var serverUrl by mutableStateOf(DEFAULT_SERVER_URL)
         private set
     var token by mutableStateOf("")
         private set
 
+    /** Hostname portion for display in headers/status text. */
+    val host: String get() = runCatching { java.net.URL(serverUrl).host }.getOrElse { serverUrl }
+
     fun init(context: Context) {
         val p = context.applicationContext.getSharedPreferences("powerk", Context.MODE_PRIVATE)
         prefs = p
-        host = p.getString("host", "").orEmpty()
-        port = p.getInt("port", 8080)
+        // Migrate legacy host+port to full URL if needed
+        val legacyHost = p.getString("host", "").orEmpty()
+        val legacyPort = p.getInt("port", 8080)
+        val storedUrl = p.getString("serverUrl", "").orEmpty()
+        serverUrl = when {
+            storedUrl.isNotBlank() -> storedUrl
+            legacyHost.isNotBlank() -> "http://$legacyHost:$legacyPort"
+            else -> DEFAULT_SERVER_URL
+        }
         token = p.getString("token", "").orEmpty()
     }
 
-    fun save(newHost: String, newPort: Int, newToken: String) {
-        host = newHost.trim()
-        port = newPort.coerceIn(1, 65535)
+    fun save(newUrl: String, newToken: String) {
+        serverUrl = newUrl.trim().trimEnd('/')
         token = newToken.trim()
         prefs?.edit()
-            ?.putString("host", host)
-            ?.putInt("port", port)
+            ?.putString("serverUrl", serverUrl)
             ?.putString("token", token)
             ?.apply()
     }
 
-    val configured: Boolean get() = host.isNotBlank()
-    val base: String get() = "http://$host:$port"
+    val configured: Boolean get() = serverUrl.isNotBlank()
+    val base: String get() = serverUrl
 }
 
 /** In-app language: null follows the phone language. */

@@ -36,8 +36,7 @@
     <string name="settings_title">Settings</string>
     <string name="server_title">Server</string>
     <string name="server_body">Where your SmartStrip server runs: your PC, a Raspberry Pi or a VPS. Add the token if the server is reachable from the internet.</string>
-    <string name="field_host">Server IP or host</string>
-    <string name="field_port">Port</string>
+    <string name="field_server_url">Server URL</string>
     <string name="field_token">Token</string>
     <string name="field_server_ip_for_strip">Server IP for strip</string>
     <string name="field_wifi_ssid">Home Wi-Fi name</string>

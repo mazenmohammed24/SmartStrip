@@ -40,7 +40,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
@@ -102,7 +101,6 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -140,7 +138,7 @@ fun PowerkApp() {
         showSplash = false
     }
 
-    LaunchedEffect(tab, Server.host, Server.port, Server.token) {
+    LaunchedEffect(tab, Server.serverUrl, Server.token) {
         while (true) {
             refresh()
             delay(2000)
@@ -742,13 +740,12 @@ private fun EmptyState(title: String, body: String, action: String? = null, onAc
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun SettingsScreen() {
-    var host by remember { mutableStateOf(Server.host) }
-    var port by remember { mutableStateOf(Server.port.toString()) }
+    var serverUrl by remember { mutableStateOf(Server.serverUrl) }
     var token by remember { mutableStateOf(Server.token) }
     var status by remember { mutableStateOf<String?>(null) }
     var statusOk by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
-    var provisionIp by remember { mutableStateOf(host) }
+    var provisionIp by remember { mutableStateOf(Server.host) }
     var provisionSsid by remember { mutableStateOf("") }
     var provisionPassword by remember { mutableStateOf("") }
     var provisionStatus by remember { mutableStateOf<String?>(null) }
@@ -799,7 +796,7 @@ private fun SettingsScreen() {
         }
     }
 
-    fun commit() = Server.save(host, port.toIntOrNull() ?: 8080, token)
+    fun commit() = Server.save(serverUrl, token)
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp),
@@ -855,29 +852,19 @@ private fun SettingsScreen() {
                 // technical values stay left-to-right even in RTL locales
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                     OutlinedTextField(
-                        value = host,
-                        onValueChange = { host = it },
-                        label = { Text(stringResource(R.string.field_host)) },
+                        value = serverUrl,
+                        onValueChange = { serverUrl = it },
+                        label = { Text(stringResource(R.string.field_server_url)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        OutlinedTextField(
-                            value = port,
-                            onValueChange = { port = it.filter(Char::isDigit).take(5) },
-                            label = { Text(stringResource(R.string.field_port)) },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier.weight(1f),
-                        )
-                        OutlinedTextField(
-                            value = token,
-                            onValueChange = { token = it },
-                            label = { Text(stringResource(R.string.field_token)) },
-                            singleLine = true,
-                            modifier = Modifier.weight(1.4f),
-                        )
-                    }
+                    OutlinedTextField(
+                        value = token,
+                        onValueChange = { token = it },
+                        label = { Text(stringResource(R.string.field_token)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Button(

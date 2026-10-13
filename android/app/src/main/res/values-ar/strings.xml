@@ -36,8 +36,7 @@
     <string name="settings_title">الإعدادات</string>
     <string name="server_title">السيرفر</string>
     <string name="server_body">المكان اللي شغّال عليه powerk.py: كمبيوتر، Raspberry Pi أو سيرفر VPS. ضيف الـ Token لو السيرفر متاح من على الإنترنت.</string>
-    <string name="field_host">عنوان IP أو اسم السيرفر</string>
-    <string name="field_port">المنفذ</string>
+    <string name="field_server_url">رابط السيرفر</string>
     <string name="field_token">الـ Token</string>
     <string name="field_server_ip_for_strip">عنوان السيرفر للمشترك</string>
     <string name="field_wifi_ssid">اسم شبكة البيت</string>
