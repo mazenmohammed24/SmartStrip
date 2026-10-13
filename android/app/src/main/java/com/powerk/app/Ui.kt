@@ -1,5 +1,7 @@
 package com.powerk.app
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
@@ -50,6 +52,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularWavyProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
@@ -754,6 +758,47 @@ private fun SettingsScreen() {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
+    // --- Wi-Fi auto-fill state ---
+    var stripNetworks by remember { mutableStateOf<List<WifiScanResult>>(emptyList()) }
+    var scanning by remember { mutableStateOf(false) }
+    var selectedStrip by remember { mutableStateOf<String?>(null) }
+    var connectingAp by remember { mutableStateOf(false) }
+    var hasLocationPermission by remember {
+        mutableStateOf(
+            android.content.pm.PackageManager.PERMISSION_GRANTED ==
+                context.checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)
+        )
+    }
+    var showStripDropdown by remember { mutableStateOf(false) }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasLocationPermission = granted
+    }
+
+    // Auto-fill current SSID when the screen opens (requires location permission)
+    LaunchedEffect(hasLocationPermission) {
+        if (hasLocationPermission) {
+            val ssid = WifiHelper.getCurrentSsid(context)
+            if (ssid.isNotBlank() && !ssid.startsWith("TONLY_TAP_")) {
+                provisionSsid = ssid
+            }
+        }
+    }
+
+    fun doScan() {
+        scope.launch {
+            scanning = true
+            val found = WifiHelper.scanForStripNetworks(context)
+            stripNetworks = found
+            scanning = false
+            if (found.isNotEmpty() && selectedStrip == null) {
+                selectedStrip = found.first().ssid
+            }
+        }
+    }
+
     fun commit() = Server.save(host, port.toIntOrNull() ?: 8080, token)
 
     Column(
@@ -909,6 +954,99 @@ private fun SettingsScreen() {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+
+                // --- Permission gate ---
+                if (!hasLocationPermission) {
+                    Surface(
+                        shape = MaterialTheme.shapes.medium,
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            Modifier.padding(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Default.Info, null, Modifier.size(18.dp))
+                            Text(
+                                stringResource(R.string.provision_need_location),
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f),
+                            )
+                            FilledTonalButton(onClick = {
+                                permissionLauncher.launch(android.Manifest.permission.ACCESS_FINE_LOCATION)
+                            }) { Text(stringResource(R.string.grant_permission)) }
+                        }
+                    }
+                }
+
+                // --- Strip AP scanner ---
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    FilledTonalButton(
+                        onClick = { doScan() },
+                        enabled = hasLocationPermission && !scanning && !provisionBusy,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(Icons.Default.Refresh, null, Modifier.size(18.dp))
+                    }
+                    if (scanning) CircularWavyProgressIndicator(Modifier.size(24.dp))
+                }
+
+                // --- Strip selector dropdown ---
+                if (stripNetworks.isNotEmpty() || selectedStrip != null) {
+                    Box {
+                        OutlinedButton(
+                            onClick = { showStripDropdown = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !provisionBusy && !connectingAp,
+                        ) {
+                            Icon(Icons.Default.Info, null, Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                selectedStrip?.let { stringResource(R.string.provision_selected_strip, it) }
+                                    ?: stringResource(R.string.provision_strips_found, stripNetworks.size),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = showStripDropdown,
+                            onDismissRequest = { showStripDropdown = false },
+                        ) {
+                            stripNetworks.forEach { net ->
+                                DropdownMenuItem(
+                                    text = { Text("${net.ssid}  (${net.rssi} dBm)") },
+                                    onClick = {
+                                        selectedStrip = net.ssid
+                                        showStripDropdown = false
+                                        // Auto-connect to selected strip AP
+                                        scope.launch {
+                                            connectingAp = true
+                                            provisionStatus = context.getString(R.string.provision_connecting_ap, net.ssid)
+                                            provisionOk = false
+                                            val network = WifiHelper.connectToStripAp(context, net.ssid) {
+                                                provisionStatus = context.getString(R.string.provision_connecting_ap, net.ssid)
+                                            }
+                                            connectingAp = false
+                                            if (network != null) {
+                                                provisionStatus = null
+                                            } else {
+                                                provisionStatus = "Could not connect to ${net.ssid}"
+                                                provisionOk = false
+                                            }
+                                        }
+                                    },
+                                )
+                            }
+                        }
+                    }
+                } else if (!scanning && hasLocationPermission) {
+                    Text(
+                        stringResource(R.string.provision_no_strips),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                     OutlinedTextField(
                         value = provisionIp,
@@ -921,6 +1059,12 @@ private fun SettingsScreen() {
                         value = provisionSsid,
                         onValueChange = { provisionSsid = it },
                         label = { Text(stringResource(R.string.field_wifi_ssid)) },
+                        placeholder = {
+                            val detected = WifiHelper.getCurrentSsid(context)
+                            if (detected.isNotBlank() && !detected.startsWith("TONLY_TAP_"))
+                                Text(stringResource(R.string.provision_home_ssid_hint, detected),
+                                    style = MaterialTheme.typography.bodySmall)
+                        },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -933,26 +1077,41 @@ private fun SettingsScreen() {
                     )
                 }
                 Button(
-                    enabled = Server.configured && !provisionBusy,
+                    enabled = Server.configured && !provisionBusy && !connectingAp,
                     onClick = {
                         commit()
                         provisionBusy = true
                         provisionStatus = null
                         scope.launch {
+                            val ssid = provisionSsid.trim().ifBlank { WifiHelper.getCurrentSsid(context) }
+                            val stripSsid = selectedStrip
                             try {
-                                val result = Api.provisionAndRegister(Server.base, Server.token, provisionIp.trim(), provisionSsid.trim(), provisionPassword)
+                                // If a strip is selected but we're not yet on its AP, connect first
+                                if (stripSsid != null) {
+                                    connectingAp = true
+                                    provisionStatus = context.getString(R.string.provision_connecting_ap, stripSsid)
+                                    val network = WifiHelper.connectToStripAp(context, stripSsid)
+                                    connectingAp = false
+                                    if (network != null) {
+                                        WifiHelper.bindProcessToNetwork(context, network)
+                                    }
+                                }
+                                val result = Api.provisionAndRegister(Server.base, Server.token, provisionIp.trim(), ssid, provisionPassword)
                                 provisionStatus = result.message
                                 provisionOk = result.registered
                             } catch (e: Exception) {
                                 provisionStatus = e.message ?: "provisioning failed"
                                 provisionOk = false
+                            } finally {
+                                WifiHelper.releaseStripNetwork(context)
+                                provisionBusy = false
+                                connectingAp = false
                             }
-                            provisionBusy = false
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text(stringResource(R.string.provision_and_register)) }
-                if (provisionBusy) CircularWavyProgressIndicator(Modifier.fillMaxWidth())
+                if (provisionBusy || connectingAp) CircularWavyProgressIndicator(Modifier.fillMaxWidth())
                 AnimatedVisibility(visible = provisionStatus != null, enter = fadeIn(), exit = fadeOut()) {
                     Surface(
                         shape = MaterialTheme.shapes.medium,
@@ -978,7 +1137,7 @@ private fun SettingsScreen() {
                 SetupStep(3, stringResource(R.string.setup_step_3))
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                     Text(
-                        "Use Provision & register above from a phone joined to TONLY_TAP_*",
+                        "Tap 'Scan for strips', select your TONLY_TAP_* network, enter home Wi-Fi password, press Provision.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(start = 30.dp),
