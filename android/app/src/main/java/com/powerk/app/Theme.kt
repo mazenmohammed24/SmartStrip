@@ -8,8 +8,13 @@ import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.graphics.Color
+import android.os.Build
 import androidx.compose.ui.unit.dp
 
 private val LightScheme = lightColorScheme(
@@ -90,16 +95,43 @@ private val PowerkShapes = Shapes(
     extraLarge = RoundedCornerShape(30.dp),
 )
 
-fun powerkScheme(dark: Boolean): ColorScheme = if (dark) DarkScheme else LightScheme
+private fun parseColor(hex: String): Color {
+    val value = hex.removePrefix("#").toLongOrNull(16) ?: 0x1B6B45
+    return Color(0xFF000000 or value)
+}
+
+private fun Color.container(alpha: Float, dark: Boolean): Color = if (dark) {
+    copy(red = red * alpha, green = green * alpha, blue = blue * alpha)
+} else {
+    copy(red = red + (1f - red) * alpha, green = green + (1f - green) * alpha, blue = blue + (1f - blue) * alpha)
+}
+
+fun powerkScheme(dark: Boolean, systemScheme: ColorScheme? = null, accentHex: String = AppTheme.accentColor): ColorScheme {
+    val base = systemScheme ?: if (dark) DarkScheme else LightScheme
+    val accent = parseColor(accentHex)
+    return base.copy(
+        primary = accent,
+        primaryContainer = accent.container(if (dark) 0.34f else 0.74f, dark),
+        inversePrimary = accent,
+    )
+}
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun PowerkTheme(
-    dark: Boolean = androidx.compose.foundation.isSystemInDarkTheme(),
+    dark: Boolean = when (AppTheme.mode) {
+        AppTheme.LIGHT -> false
+        AppTheme.DARK -> true
+        else -> isSystemInDarkTheme()
+    },
     content: @Composable () -> Unit,
 ) {
+    val context = LocalContext.current
+    val systemScheme = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+    } else null
     MaterialExpressiveTheme(
-        colorScheme = powerkScheme(dark),
+        colorScheme = powerkScheme(dark, systemScheme),
         motionScheme = MotionScheme.expressive(),
         shapes = PowerkShapes,
         content = content,

@@ -17,6 +17,7 @@ data class Outlet(
     val powerW: Double,
     val energyKwh: Double,
     val tempC: Int,
+    val icon: String,
 )
 
 data class Strip(
@@ -31,12 +32,37 @@ data class Strip(
     val voltage: Double?,
     val currentA: Double?,
     val rssi: Int?,
+    val icon: String,
     val outlets: List<Outlet>,
 )
 
 data class Snapshot(val serverIp: String, val strips: List<Strip>)
 data class DiscoveredStrip(val driverStripId: String, val model: String, val suggestedName: String, val ipAddress: String?, val relayCount: Int)
 data class ProvisionResult(val registered: Boolean, val stripName: String?, val message: String)
+data class PowerSummary(val todayKwh: Double, val todayCost: Double, val currency: String, val liveWatts: Double)
+data class PowerPoint(val bucketStart: String, val avgW: Double, val minW: Double, val maxW: Double, val kwh: Double)
+data class PowerHistory(val range: String, val points: List<PowerPoint>)
+data class EventItem(val id: String, val type: String, val message: String, val stripName: String?, val createdAt: String)
+data class NotificationItem(val id: String, val title: String, val body: String, val severity: String, val readAt: String?, val createdAt: String)
+data class ScheduleItem(
+    val id: String,
+    val name: String,
+    val stripId: String,
+    val relayIndex: Int?,
+    val action: String,
+    val time: String,
+    val daysOfWeek: List<Int>,
+    val enabled: Boolean,
+)
+data class AppSettings(
+    val theme: String,
+    val energyUnit: String,
+    val currency: String,
+    val ratePerKwh: Double,
+    val overloadThresholdWatts: Int,
+    val timeFormat: String,
+)
+
 
 /** Outlet by its number (1..4) - never by list position. */
 fun Strip.outletOn(n: Int): Boolean = outlets.firstOrNull { it.n == n }?.on ?: false
@@ -66,6 +92,249 @@ object Api {
         request("$base$path", body, token)
     }
 
+
+    suspend fun updateStripIcon(base: String, token: String, stripId: String, icon: String) = withContext(Dispatchers.IO) {
+        val body = JSONObject().put("icon", icon).toString()
+        request("$base/api/strips/$stripId", body, token, "PATCH")
+    }
+
+    suspend fun updateOutletIcon(base: String, token: String, stripId: String, outlet: Int, icon: String) = withContext(Dispatchers.IO) {
+        val body = JSONObject().put("icon", icon).toString()
+        request("$base/api/strips/$stripId/relays/${outlet - 1}", body, token, "PATCH")
+    }
+
+
+
+    suspend fun powerSummary(base: String, token: String, stripId: String): PowerSummary = withContext(Dispatchers.IO) {
+
+        val o = JSONObject(request("$base/api/power/summary?stripId=$stripId", null, token))
+
+        PowerSummary(
+
+            todayKwh = o.optDouble("todayKwh", 0.0),
+
+            todayCost = o.optDouble("todayCost", 0.0),
+
+            currency = o.optString("currency", "USD"),
+
+            liveWatts = o.optDouble("liveWatts", 0.0),
+
+        )
+
+    }
+
+
+
+    suspend fun powerHistory(base: String, token: String, stripId: String, range: String = "7d"): PowerHistory = withContext(Dispatchers.IO) {
+
+        val o = JSONObject(request("$base/api/power/history?stripId=$stripId&range=$range", null, token))
+
+        val arr = o.optJSONArray("points")
+
+        val points = (0 until (arr?.length() ?: 0)).map { i ->
+
+            val x = arr!!.getJSONObject(i)
+
+            PowerPoint(
+
+                bucketStart = x.optString("bucketStart"),
+
+                avgW = x.optDouble("avgW", 0.0),
+
+                minW = x.optDouble("minW", 0.0),
+
+                maxW = x.optDouble("maxW", 0.0),
+
+                kwh = x.optDouble("kwh", 0.0),
+
+            )
+
+        }
+
+        PowerHistory(o.optString("range", range), points)
+
+    }
+
+
+
+    suspend fun events(base: String, token: String, stripId: String? = null): List<EventItem> = withContext(Dispatchers.IO) {
+
+        val suffix = stripId?.let { "?stripId=$it" } ?: ""
+
+        val root = JSONObject(request("$base/api/events$suffix", null, token))
+
+        val arr = root.optJSONArray("events")
+
+        (0 until (arr?.length() ?: 0)).map { i ->
+
+            val x = arr!!.getJSONObject(i)
+
+            EventItem(
+
+                id = x.optString("id"),
+
+                type = x.optString("type"),
+
+                message = x.optString("message"),
+
+                stripName = x.optString("stripName").ifBlank { null },
+
+                createdAt = x.optString("createdAt"),
+
+            )
+
+        }
+
+    }
+
+
+
+    suspend fun notifications(base: String, token: String): List<NotificationItem> = withContext(Dispatchers.IO) {
+
+        val root = JSONObject(request("$base/api/notifications", null, token))
+
+        val arr = root.optJSONArray("notifications")
+
+        (0 until (arr?.length() ?: 0)).map { i ->
+
+            val x = arr!!.getJSONObject(i)
+
+            NotificationItem(
+
+                id = x.optString("id"),
+
+                title = x.optString("title"),
+
+                body = x.optString("body"),
+
+                severity = x.optString("severity"),
+
+                readAt = if (x.isNull("readAt")) null else x.optString("readAt"),
+
+                createdAt = x.optString("createdAt"),
+
+            )
+
+        }
+
+    }
+
+
+
+    suspend fun markNotificationRead(base: String, token: String, id: String) = withContext(Dispatchers.IO) {
+
+        request("$base/api/notifications/$id/read", "{}", token, "PATCH")
+
+    }
+
+
+
+    suspend fun markAllNotificationsRead(base: String, token: String) = withContext(Dispatchers.IO) {
+
+        request("$base/api/notifications/read-all", "{}", token, "POST")
+
+    }
+
+
+
+    suspend fun deleteNotification(base: String, token: String, id: String) = withContext(Dispatchers.IO) {
+
+        request("$base/api/notifications/$id", null, token, "DELETE")
+
+    }
+
+
+
+    suspend fun schedules(base: String, token: String): List<ScheduleItem> = withContext(Dispatchers.IO) {
+
+        val root = JSONObject(request("$base/api/schedules", null, token))
+
+        val arr = root.optJSONArray("schedules")
+
+        (0 until (arr?.length() ?: 0)).map { i -> parseSchedule(arr!!.getJSONObject(i)) }
+
+    }
+
+
+
+    suspend fun saveSchedule(base: String, token: String, schedule: ScheduleItem): ScheduleItem = withContext(Dispatchers.IO) {
+
+        val body = JSONObject()
+
+            .put("name", schedule.name)
+
+            .put("stripId", schedule.stripId)
+
+            .put("relayIndex", schedule.relayIndex)
+
+            .put("action", schedule.action)
+
+            .put("time", schedule.time)
+
+            .put("daysOfWeek", org.json.JSONArray(schedule.daysOfWeek))
+
+            .put("enabled", schedule.enabled)
+
+            .toString()
+
+        val url = if (schedule.id.isBlank()) "$base/api/schedules" else "$base/api/schedules/${schedule.id}"
+
+        val method = if (schedule.id.isBlank()) "POST" else "PATCH"
+
+        parseSchedule(JSONObject(request(url, body, token, method)).getJSONObject("schedule"))
+
+    }
+
+
+
+    suspend fun deleteSchedule(base: String, token: String, id: String) = withContext(Dispatchers.IO) {
+
+        request("$base/api/schedules/$id", null, token, "DELETE")
+
+    }
+
+
+
+    suspend fun runScheduleNow(base: String, token: String, id: String) = withContext(Dispatchers.IO) {
+
+        request("$base/api/schedules/$id/run-now", "{}", token, "POST")
+
+    }
+
+
+
+    suspend fun settings(base: String, token: String): AppSettings = withContext(Dispatchers.IO) {
+
+        parseSettings(JSONObject(request("$base/api/settings", null, token)).getJSONObject("settings"))
+
+    }
+
+
+
+    suspend fun saveSettings(base: String, token: String, settings: AppSettings): AppSettings = withContext(Dispatchers.IO) {
+
+        val body = JSONObject()
+
+            .put("theme", settings.theme)
+
+            .put("energyUnit", settings.energyUnit)
+
+            .put("currency", settings.currency)
+
+            .put("ratePerKwh", settings.ratePerKwh)
+
+            .put("overloadThresholdWatts", settings.overloadThresholdWatts)
+
+            .put("timeFormat", settings.timeFormat)
+
+            .toString()
+
+        parseSettings(JSONObject(request("$base/api/settings", body, token, "PATCH")).getJSONObject("settings"))
+
+    }
+
+
+
     suspend fun provisionAndRegister(base: String, token: String, serverIp: String, ssid: String, password: String): ProvisionResult = withContext(Dispatchers.IO) {
         validateProvisionInput(serverIp, ssid, password)
         val ipReply = setupCommand("up:ip:$serverIp", "up:ip", false)
@@ -93,12 +362,12 @@ object Api {
         ProvisionResult(true, strip.suggestedName, "${strip.suggestedName} is provisioned and registered on your SmartStrip server.")
     }
 
-    internal fun request(url: String, body: String?, token: String): String {
+    internal fun request(url: String, body: String?, token: String, method: String? = null): String {
         val connection = (URL(url).openConnection() as HttpURLConnection)
         try {
             connection.connectTimeout = 4000
             connection.readTimeout = 8000
-            connection.requestMethod = if (body == null) "GET" else "POST"
+            connection.requestMethod = method ?: if (body == null) "GET" else "POST"
             if (token.isNotBlank()) connection.setRequestProperty("X-Token", token)
             if (body != null) {
                 connection.doOutput = true
@@ -147,6 +416,7 @@ object Api {
                 powerW = x.optDouble("watts", 0.0),
                 energyKwh = extra?.optDouble("energyKwh", 0.0) ?: 0.0,
                 tempC = extra?.optInt("temperatureC") ?: 0,
+                icon = x.optString("icon", "plug"),
             )
         }
         return Strip(
@@ -161,6 +431,7 @@ object Api {
             voltage = telemetry?.optDoubleOrNull("voltageV"),
             currentA = telemetry?.optDoubleOrNull("currentA"),
             rssi = telemetry?.optIntOrNull("rssi"),
+            icon = o.optString("icon", "power-strip"),
             outlets = outlets,
         )
     }
@@ -177,6 +448,54 @@ object Api {
         }
         return emptyList()
     }
+
+
+
+    private fun parseSchedule(x: JSONObject): ScheduleItem {
+
+        val days = x.optJSONArray("daysOfWeek")
+
+        return ScheduleItem(
+
+            id = x.optString("id"),
+
+            name = x.optString("name"),
+
+            stripId = x.optString("stripId"),
+
+            relayIndex = if (x.isNull("relayIndex")) null else x.optInt("relayIndex"),
+
+            action = x.optString("action", "on"),
+
+            time = x.optString("time", "18:00"),
+
+            daysOfWeek = (0 until (days?.length() ?: 0)).map { days!!.optInt(it) },
+
+            enabled = x.optBoolean("enabled", true),
+
+        )
+
+    }
+
+
+
+    private fun parseSettings(x: JSONObject): AppSettings = AppSettings(
+
+        theme = x.optString("theme", "system"),
+
+        energyUnit = x.optString("energyUnit", "kWh"),
+
+        currency = x.optString("currency", "USD"),
+
+        ratePerKwh = x.optDouble("ratePerKwh", 0.16),
+
+        overloadThresholdWatts = x.optInt("overloadThresholdWatts", 1800),
+
+        timeFormat = x.optString("timeFormat", "24h"),
+
+    )
+
+
 
     private fun parseDiscovered(record: JSONObject): List<DiscoveredStrip> {
         val array = record.optJSONArray("discovered")

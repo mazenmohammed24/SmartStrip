@@ -2,24 +2,15 @@ package com.powerk.app
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -32,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -85,7 +77,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -141,7 +132,7 @@ fun PowerkApp() {
     LaunchedEffect(tab, Server.serverUrl, Server.token) {
         while (true) {
             refresh()
-            delay(2000)
+            delay(5000)
         }
     }
 
@@ -157,6 +148,19 @@ fun PowerkApp() {
                 snackbar.showSnackbar(e.message ?: "command failed")
             } finally {
                 keys.forEach { pending.remove(it) }
+            }
+        }
+    }
+
+
+    fun updateIcon(mac: String, outlet: Int?, icon: String) {
+        scope.launch {
+            try {
+                if (outlet == null) Api.updateStripIcon(Server.base, Server.token, mac, icon)
+                else Api.updateOutletIcon(Server.base, Server.token, mac, outlet, icon)
+                refresh()
+            } catch (e: Exception) {
+                snackbar.showSnackbar(e.message ?: "icon update failed")
             }
         }
     }
@@ -177,35 +181,55 @@ fun PowerkApp() {
                     ShortNavigationBarItem(
                         selected = tab == 1,
                         onClick = { tab = 1 },
+                        icon = { Icon(Icons.Filled.Info, contentDescription = null) },
+                        label = { Text(stringResource(R.string.tab_power)) },
+                    )
+                    ShortNavigationBarItem(
+                        selected = tab == 2,
+                        onClick = { tab = 2 },
+                        icon = { Icon(Icons.Filled.Refresh, contentDescription = null) },
+                        label = { Text(stringResource(R.string.tab_automations)) },
+                    )
+                    ShortNavigationBarItem(
+                        selected = tab == 3,
+                        onClick = { tab = 3 },
+                        icon = { Icon(Icons.Filled.Warning, contentDescription = null) },
+                        label = { Text(stringResource(R.string.tab_activity)) },
+                    )
+                    ShortNavigationBarItem(
+                        selected = tab == 4,
+                        onClick = { tab = 4 },
+                        icon = { Icon(Icons.Filled.Info, contentDescription = null) },
+                        label = { Text(stringResource(R.string.tab_notifications)) },
+                    )
+                    ShortNavigationBarItem(
+                        selected = tab == 5,
+                        onClick = { tab = 5 },
                         icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
                         label = { Text(stringResource(R.string.tab_settings)) },
                     )
                 }
             },
         ) { padding ->
-            AnimatedContent(
-                targetState = tab,
-                transitionSpec = {
-                    val forward = targetState > initialState
-                    val shift = if (forward) 1 else -1
-                    (fadeIn(tween(240)) + slideInVertically(tween(280)) { it / 10 * shift }) togetherWith
-                        (fadeOut(tween(140)) + slideOutVertically(tween(200)) { -it / 14 * shift })
-                },
-                label = "tab",
+            Box(
                 modifier = Modifier.fillMaxSize().padding(padding),
-            ) { current ->
-                if (current == 0) {
-                    PlugsScreen(
+            ) {
+                when (tab) {
+                    0 -> PlugsScreen(
                         snapshot = snapshot,
                         error = error,
                         loading = loading,
                         pending = pending,
                         onRefresh = { scope.launch { refresh() } },
-                        onOpenSettings = { tab = 1 },
+                        onOpenSettings = { tab = 5 },
                         onCommand = { mac, outlet, on -> command(mac, outlet, on) },
+                        onIconChange = { mac, outlet, icon -> updateIcon(mac, outlet, icon) },
                     )
-                } else {
-                    SettingsScreen()
+                    1 -> PowerScreen(snapshot)
+                    2 -> AutomationsScreen(snapshot)
+                    3 -> ActivityScreen(snapshot)
+                    4 -> NotificationsScreen()
+                    else -> SettingsScreen()
                 }
             }
         }
@@ -280,6 +304,7 @@ private fun PlugsScreen(
     onRefresh: () -> Unit,
     onOpenSettings: () -> Unit,
     onCommand: (String, Int, Boolean) -> Unit,
+    onIconChange: (String, Int?, String) -> Unit,
 ) {
     val strips = snapshot?.strips.orEmpty()
 
@@ -299,12 +324,8 @@ private fun PlugsScreen(
         }
 
         item {
-            AnimatedVisibility(
-                visible = error != null,
-                enter = fadeIn() + slideInVertically { -it / 3 },
-                exit = fadeOut(),
-            ) {
-                MessageCard(error ?: "", isError = true, icon = Icons.Filled.Warning)
+            if (error != null) {
+                MessageCard(error, isError = true, icon = Icons.Filled.Warning)
             }
         }
 
@@ -324,7 +345,8 @@ private fun PlugsScreen(
                     showMac = strips.size > 1,
                     pending = pending,
                     onCommand = onCommand,
-                    modifier = Modifier.animateItem(),
+                    onIconChange = onIconChange,
+                    modifier = Modifier,
                 )
             }
 
@@ -364,13 +386,6 @@ private fun Header(
     loading: Boolean,
     onRefresh: () -> Unit,
 ) {
-    val spin = rememberInfiniteTransition(label = "refresh")
-    val angle by spin.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(tween(900, easing = LinearEasing)),
-        label = "angle",
-    )
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(
@@ -390,7 +405,7 @@ private fun Header(
             Icon(
                 Icons.Filled.Refresh,
                 contentDescription = stringResource(R.string.refresh),
-                modifier = Modifier.rotate(if (loading) angle else 0f),
+                modifier = Modifier,
             )
         }
     }
@@ -403,6 +418,7 @@ private fun StripCard(
     showMac: Boolean,
     pending: Map<String, Boolean>,
     onCommand: (String, Int, Boolean) -> Unit,
+    onIconChange: (String, Int?, String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val stateOf: (Int) -> Boolean = { n -> pending["${strip.mac}:$n"] ?: strip.outletOn(n) }
@@ -412,8 +428,24 @@ private fun StripCard(
     ElevatedCard(modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
 
+            var stripIconMenu by remember { mutableStateOf(false) }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 StatusDot(online = strip.online)
+                Spacer(Modifier.width(10.dp))
+                Box {
+                    OutlinedButton(onClick = { stripIconMenu = true }) {
+                        Text(iconGlyph(strip.icon), style = MaterialTheme.typography.titleLarge)
+                    }
+                    IconPickerMenu(
+                        expanded = stripIconMenu,
+                        selected = strip.icon,
+                        onDismiss = { stripIconMenu = false },
+                        onSelect = { icon ->
+                            stripIconMenu = false
+                            onIconChange(strip.mac, null, icon)
+                        },
+                    )
+                }
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
                     val title = stringResource(R.string.strip_name) +
@@ -453,6 +485,7 @@ private fun StripCard(
                                 pending = pending.containsKey("${strip.mac}:${outlet.n}"),
                                 enabled = strip.online,
                                 onToggle = { onCommand(strip.mac, outlet.n, it) },
+                                onIconChange = { icon -> onIconChange(strip.mac, outlet.n, icon) },
                                 modifier = Modifier.weight(1f),
                             )
                         }
@@ -486,6 +519,7 @@ private fun OutletTile(
     pending: Boolean,
     enabled: Boolean,
     onToggle: (Boolean) -> Unit,
+    onIconChange: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scheme = MaterialTheme.colorScheme
@@ -519,23 +553,32 @@ private fun OutletTile(
             Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
+            var iconMenu by remember { mutableStateOf(false) }
             Row(verticalAlignment = Alignment.CenterVertically) {
+                Box {
+                    OutlinedButton(onClick = { iconMenu = true }, enabled = enabled && !pending) {
+                        Text(iconGlyph(outlet.icon), style = MaterialTheme.typography.titleMedium)
+                    }
+                    IconPickerMenu(
+                        expanded = iconMenu,
+                        selected = outlet.icon,
+                        onDismiss = { iconMenu = false },
+                        onSelect = { icon ->
+                            iconMenu = false
+                            onIconChange(icon)
+                        },
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
                 Text(
                     stringResource(R.string.outlet_n, outlet.n),
                     style = MaterialTheme.typography.labelLarge,
                     modifier = Modifier.weight(1f),
                 )
-                // while the strip is answering, the switch becomes a spinner
-                AnimatedContent(
-                    targetState = pending,
-                    transitionSpec = { fadeIn(tween(160)) togetherWith fadeOut(tween(120)) },
-                    label = "switch-pending",
-                ) { isPending ->
-                    if (isPending) {
-                        CircularWavyProgressIndicator(Modifier.size(22.dp))
-                    } else {
-                        MiniSwitch(progress = progress, onColor = scheme.primary)
-                    }
+                if (pending) {
+                    CircularWavyProgressIndicator(Modifier.size(22.dp))
+                } else {
+                    MiniSwitch(progress = progress, onColor = scheme.primary)
                 }
             }
             Text(
@@ -575,6 +618,36 @@ private fun MiniSwitch(progress: Float, onColor: Color) {
                 .clip(CircleShape)
                 .background(thumb),
         )
+    }
+}
+
+
+private val IconOptions = listOf(
+    "power-strip" to "?", "plug" to "??", "lamp" to "??", "charger" to "?",
+    "computer" to "???", "laptop" to "??", "monitor" to "???", "printer" to "???",
+    "phone" to "??", "router" to "??", "tv" to "??", "speaker" to "??",
+    "gamepad" to "??", "fridge" to "??", "heater" to "??", "fan" to "??",
+    "air-conditioner" to "??", "coffee" to "?", "kettle" to "??", "microwave" to "??",
+    "washer" to "??", "idle" to "?",
+)
+
+private fun iconGlyph(icon: String): String = IconOptions.firstOrNull { it.first == icon }?.second ?: "??"
+
+@Composable
+private fun IconPickerMenu(
+    expanded: Boolean,
+    selected: String,
+    onDismiss: () -> Unit,
+    onSelect: (String) -> Unit,
+) {
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        IconOptions.forEach { (value, glyph) ->
+            DropdownMenuItem(
+                text = { Text("$glyph  ${value.replace('-', ' ')}") },
+                onClick = { onSelect(value) },
+                leadingIcon = { if (selected == value) Text("?") },
+            )
+        }
     }
 }
 
@@ -666,17 +739,9 @@ private fun MetricPill(value: String) {
 
 @Composable
 private fun StatusDot(online: Boolean) {
-    val pulse = rememberInfiniteTransition(label = "dot")
-    val alpha by pulse.animateFloat(
-        initialValue = 0.35f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
-        label = "alpha",
-    )
     Box(
         Modifier
             .size(11.dp)
-            .graphicsLayer { this.alpha = if (online) 1f else alpha }
             .background(
                 if (online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
                 CircleShape,
@@ -737,6 +802,250 @@ private fun EmptyState(title: String, body: String, action: String? = null, onAc
     }
 }
 
+
+@Composable
+private fun PowerScreen(snapshot: Snapshot?) {
+    val strips = snapshot?.strips.orEmpty()
+    var selectedId by remember(strips) { mutableStateOf(strips.firstOrNull()?.mac.orEmpty()) }
+    var range by remember { mutableStateOf("7d") }
+    var summary by remember { mutableStateOf<PowerSummary?>(null) }
+    var history by remember { mutableStateOf<PowerHistory?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    val selected = strips.firstOrNull { it.mac == selectedId } ?: strips.firstOrNull()
+
+    fun load() {
+        val id = selected?.mac ?: return
+        scope.launch {
+            try {
+                summary = Api.powerSummary(Server.base, Server.token, id)
+                history = Api.powerHistory(Server.base, Server.token, id, range)
+                error = null
+            } catch (e: Exception) {
+                error = e.message ?: "power failed"
+            }
+        }
+    }
+
+    LaunchedEffect(selected?.mac, range) { load() }
+
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(18.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        item { ScreenTitle(stringResource(R.string.power_title), stringResource(R.string.power_body)) }
+        if (strips.isEmpty()) {
+            item { EmptyState(stringResource(R.string.no_strip_title), stringResource(R.string.power_empty), stringResource(R.string.refresh), onAction = { load() }) }
+        } else {
+            item {
+                SegmentedButtonRow(
+                    options = listOf("day", "7d", "30d", "90d"),
+                    selected = range,
+                    onSelected = { range = it },
+                )
+            }
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(stringResource(R.string.power_strip_select), style = MaterialTheme.typography.labelLarge)
+                    strips.forEach { strip ->
+                        FilledTonalButton(
+                            onClick = { selectedId = strip.mac },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(strip.name.ifBlank { strip.mac }) }
+                    }
+                }
+            }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                    SummaryMetric(stringResource(R.string.power_today), "${summary?.todayKwh ?: selected?.energyKwh ?: 0.0}", "kWh", Modifier.weight(1f))
+                    SummaryMetric(stringResource(R.string.power_live), "${(summary?.liveWatts ?: selected?.powerW ?: 0.0).roundToInt()}", "W", Modifier.weight(1f))
+                }
+            }
+            item { SummaryMetric(stringResource(R.string.power_cost), "${summary?.todayCost ?: 0.0}", summary?.currency ?: "USD", Modifier.fillMaxWidth()) }
+            item {
+                ElevatedCard(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(stringResource(R.string.power_history), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        val points = history?.points.orEmpty()
+                        if (points.isEmpty()) {
+                            Text(stringResource(R.string.power_no_history), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        } else {
+                            points.takeLast(12).forEach { point ->
+                                val watts = point.avgW.roundToInt()
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(point.bucketStart.take(10), Modifier.weight(1f), style = MaterialTheme.typography.labelSmall)
+                                    Box(Modifier.weight(2f).height(8.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHighest)) {
+                                        Box(Modifier.fillMaxWidth((watts / 2000f).coerceIn(0f, 1f)).height(8.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary))
+                                    }
+                                    Text("$watts W", Modifier.width(64.dp), textAlign = TextAlign.End, style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            error?.let { item { MessageCard(it, isError = true, icon = Icons.Filled.Warning) } }
+        }
+    }
+}
+
+@Composable
+private fun ActivityScreen(snapshot: Snapshot?) {
+    val strips = snapshot?.strips.orEmpty()
+    var selectedId by remember { mutableStateOf<String?>(null) }
+    var events by remember { mutableStateOf<List<EventItem>>(emptyList()) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    fun load() {
+        scope.launch {
+            try {
+                events = Api.events(Server.base, Server.token, selectedId)
+                error = null
+            } catch (e: Exception) { error = e.message }
+        }
+    }
+    LaunchedEffect(selectedId) { load() }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { ScreenTitle(stringResource(R.string.activity_title), stringResource(R.string.activity_body)) }
+        item {
+            SegmentedButtonRow(listOf("all") + strips.map { it.mac }, selectedId ?: "all") { selectedId = if (it == "all") null else it }
+        }
+        if (events.isEmpty()) item { EmptyState(stringResource(R.string.activity_empty_title), stringResource(R.string.activity_empty_body), stringResource(R.string.refresh), onAction = { load() }) }
+        items(events, key = { it.id }) { event -> EventCard(event) }
+        error?.let { item { MessageCard(it, isError = true, icon = Icons.Filled.Warning) } }
+    }
+}
+
+@Composable
+private fun NotificationsScreen() {
+    var notifications by remember { mutableStateOf<List<NotificationItem>>(emptyList()) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    fun load() {
+        scope.launch {
+            try { notifications = Api.notifications(Server.base, Server.token); error = null } catch (e: Exception) { error = e.message }
+        }
+    }
+    LaunchedEffect(Unit) { load() }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { ScreenTitle(stringResource(R.string.notifications_title), stringResource(R.string.notifications_body)) }
+        if (notifications.isNotEmpty()) {
+            item { FilledTonalButton(onClick = { scope.launch { Api.markAllNotificationsRead(Server.base, Server.token); load() } }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.mark_all_read)) } }
+        }
+        if (notifications.isEmpty()) item { EmptyState(stringResource(R.string.notifications_empty_title), stringResource(R.string.notifications_empty_body), stringResource(R.string.refresh), onAction = { load() }) }
+        items(notifications, key = { it.id }) { n ->
+            ElevatedCard(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(n.title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        MetricPill(n.severity)
+                    }
+                    Text(n.body, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (n.readAt == null) FilledTonalButton(onClick = { scope.launch { Api.markNotificationRead(Server.base, Server.token, n.id); load() } }) { Text(stringResource(R.string.mark_read)) }
+                        OutlinedButton(onClick = { scope.launch { Api.deleteNotification(Server.base, Server.token, n.id); load() } }) { Text(stringResource(R.string.delete)) }
+                    }
+                }
+            }
+        }
+        error?.let { item { MessageCard(it, isError = true, icon = Icons.Filled.Warning) } }
+    }
+}
+
+@Composable
+private fun AutomationsScreen(snapshot: Snapshot?) {
+    val strips = snapshot?.strips.orEmpty()
+    var schedules by remember { mutableStateOf<List<ScheduleItem>>(emptyList()) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    fun load() { scope.launch { try { schedules = Api.schedules(Server.base, Server.token); error = null } catch (e: Exception) { error = e.message } } }
+    LaunchedEffect(Unit) { load() }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { ScreenTitle(stringResource(R.string.automations_title), stringResource(R.string.automations_body)) }
+        item {
+            if (strips.isNotEmpty()) {
+                FilledTonalButton(
+                    onClick = {
+                        val first = strips.first()
+                        scope.launch {
+                            Api.saveSchedule(Server.base, Server.token, ScheduleItem("", "Evening lights", first.mac, null, "on", "18:00", listOf(0,1,2,3,4,5,6), true))
+                            load()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(stringResource(R.string.new_automation)) }
+            }
+        }
+        if (schedules.isEmpty()) item { EmptyState(stringResource(R.string.automations_empty_title), stringResource(R.string.automations_empty_body), null, null) }
+        items(schedules, key = { it.id }) { s ->
+            val strip = strips.firstOrNull { it.mac == s.stripId }
+            val target = s.relayIndex?.let { stringResource(R.string.outlet_n, it + 1) } ?: stringResource(R.string.all_outlets)
+            ElevatedCard(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(s.name, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        MetricPill(if (s.enabled) stringResource(R.string.enabled) else stringResource(R.string.disabled))
+                    }
+                    Text("${strip?.name ?: s.stripId} ? $target ? ${s.action} ? ${s.time}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilledTonalButton(onClick = { scope.launch { Api.runScheduleNow(Server.base, Server.token, s.id) } }) { Text(stringResource(R.string.run_now)) }
+                        OutlinedButton(onClick = { scope.launch { Api.saveSchedule(Server.base, Server.token, s.copy(enabled = !s.enabled)); load() } }) { Text(if (s.enabled) stringResource(R.string.disable) else stringResource(R.string.enable)) }
+                        OutlinedButton(onClick = { scope.launch { Api.deleteSchedule(Server.base, Server.token, s.id); load() } }) { Text(stringResource(R.string.delete)) }
+                    }
+                }
+            }
+        }
+        error?.let { item { MessageCard(it, isError = true, icon = Icons.Filled.Warning) } }
+    }
+}
+
+@Composable
+private fun ScreenTitle(title: String, body: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+        Text(body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun SummaryMetric(label: String, value: String, unit: String, modifier: Modifier = Modifier) {
+    ElevatedCard(modifier) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(value, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.width(4.dp))
+                Text(unit, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SegmentedButtonRow(options: List<String>, selected: String, onSelected: (String) -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+        options.take(5).forEach { option ->
+            FilledTonalButton(onClick = { onSelected(option) }, modifier = Modifier.weight(1f)) { Text(option.take(8), maxLines = 1) }
+        }
+    }
+}
+
+@Composable
+private fun EventCard(event: EventItem) {
+    ElevatedCard(Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(when (event.type) { "relay-on" -> "??"; "relay-off" -> "?"; "overload" -> "??"; "online" -> "??"; "offline" -> "??"; else -> "?" })
+            Column(Modifier.weight(1f)) {
+                Text(event.message, style = MaterialTheme.typography.bodyMedium)
+                Text(listOfNotNull(event.stripName, event.createdAt.take(16)).joinToString(" ? "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            MetricPill(event.type)
+        }
+    }
+}
+
+
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun SettingsScreen() {
@@ -752,6 +1061,7 @@ private fun SettingsScreen() {
     var provisionOk by remember { mutableStateOf(false) }
     var provisionBusy by remember { mutableStateOf(false) }
     var lang by remember { mutableStateOf(Lang.code) }
+    var accentColor by remember { mutableStateOf(AppTheme.accentColor) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -833,6 +1143,63 @@ private fun SettingsScreen() {
                             shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
                         ) { Text(label) }
                     }
+                }
+            }
+        }
+
+
+        ElevatedCard(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text(
+                    stringResource(R.string.theme_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    stringResource(R.string.theme_body),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                val themeOptions = listOf(
+                    AppTheme.SYSTEM to stringResource(R.string.theme_system),
+                    AppTheme.LIGHT to stringResource(R.string.theme_light),
+                    AppTheme.DARK to stringResource(R.string.theme_dark),
+                )
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    themeOptions.forEachIndexed { index, (value, label) ->
+                        SegmentedButton(
+                            selected = AppTheme.mode == value,
+                            onClick = { AppTheme.set(value) },
+                            shape = SegmentedButtonDefaults.itemShape(index = index, count = themeOptions.size),
+                        ) { Text(label) }
+                    }
+                }
+
+                Text(stringResource(R.string.theme_accent), style = MaterialTheme.typography.labelLarge)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    listOf("#1B6B45", "#176F91", "#7C3AED", "#C2410C", "#BE123C").forEach { color ->
+                        OutlinedButton(
+                            onClick = {
+                                accentColor = color
+                                AppTheme.setAccent(color)
+                            },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(if (accentColor.equals(color, ignoreCase = true)) "?" else " ")
+                        }
+                    }
+                }
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    OutlinedTextField(
+                        value = accentColor,
+                        onValueChange = {
+                            accentColor = it
+                            AppTheme.setAccent(it)
+                        },
+                        label = { Text(stringResource(R.string.theme_custom_color)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
             }
         }

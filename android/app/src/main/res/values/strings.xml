@@ -3,6 +3,10 @@
     <string name="app_name">powerk</string>
 
     <string name="tab_plugs">Plugs</string>
+    <string name="tab_power">Power</string>
+    <string name="tab_automations">Auto</string>
+    <string name="tab_activity">Activity</string>
+    <string name="tab_notifications">Alerts</string>
     <string name="tab_settings">Settings</string>
     <string name="splash_tagline">Local power control</string>
 
@@ -60,6 +64,13 @@
     <string name="open_web_ui">Open web UI in browser</string>
 
     <string name="language_title">Language</string>
+    <string name="theme_title">Theme</string>
+    <string name="theme_body">Default uses your Android system color scheme. You can override mode and accent color here.</string>
+    <string name="theme_system">System</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="theme_accent">Accent color</string>
+    <string name="theme_custom_color">Custom color (#RRGGBB)</string>
     <string name="lang_system">System</string>
     <string name="lang_english">English</string>
     <string name="lang_arabic">العربية</string>
@@ -71,4 +82,36 @@
     <string name="setup_step_3">Point the strip at that machine once:</string>
     <string name="setup_step_4">Done — the strip connects on its own. No router DNS or port forwarding.</string>
     <string name="setup_footer">The Android app talks to the same JSON API as the web UI.</string>
+
+    <string name="power_title">Power</string>
+    <string name="power_body">Usage, live draw, daily cost and history from the same portal endpoints.</string>
+    <string name="power_empty">Add or provision a strip to see power history.</string>
+    <string name="power_strip_select">Strip</string>
+    <string name="power_today">Today</string>
+    <string name="power_live">Live draw</string>
+    <string name="power_cost">Cost today</string>
+    <string name="power_history">History</string>
+    <string name="power_no_history">No history yet. Keep the server running to collect samples.</string>
+    <string name="activity_title">Activity</string>
+    <string name="activity_body">Relay actions, schedules and connectivity changes.</string>
+    <string name="activity_empty_title">No activity yet</string>
+    <string name="activity_empty_body">Relay toggles, automations and connectivity changes will show here.</string>
+    <string name="notifications_title">Notifications</string>
+    <string name="notifications_body">Overload, connectivity and automation notices from the server.</string>
+    <string name="notifications_empty_title">No notifications yet</string>
+    <string name="notifications_empty_body">Important SmartStrip alerts will appear here.</string>
+    <string name="mark_all_read">Mark all read</string>
+    <string name="mark_read">Mark read</string>
+    <string name="delete">Delete</string>
+    <string name="automations_title">Automations</string>
+    <string name="automations_body">Create and manage time-based outlet actions.</string>
+    <string name="automations_empty_title">No automations yet</string>
+    <string name="automations_empty_body">Create rules to turn outlets on or off automatically.</string>
+    <string name="new_automation">New evening automation</string>
+    <string name="all_outlets">All outlets</string>
+    <string name="enabled">Enabled</string>
+    <string name="disabled">Disabled</string>
+    <string name="run_now">Run now</string>
+    <string name="enable">Enable</string>
+    <string name="disable">Disable</string>
 </resources>

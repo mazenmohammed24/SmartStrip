@@ -10,6 +10,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         Server.init(this)
+        AppTheme.init(this)
         Lang.init(this)
         Lang.applyStored(this)
         setContent {

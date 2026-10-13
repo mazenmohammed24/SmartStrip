@@ -3,6 +3,10 @@
     <string name="app_name">powerk</string>
 
     <string name="tab_plugs">الفيش</string>
+    <string name="tab_power">الطاقة</string>
+    <string name="tab_automations">تلقائي</string>
+    <string name="tab_activity">النشاط</string>
+    <string name="tab_notifications">تنبيهات</string>
     <string name="tab_settings">الإعدادات</string>
     <string name="splash_tagline">تحكم في الكهربا من عندك</string>
 
@@ -60,6 +64,13 @@
     <string name="open_web_ui">افتح الواجهة في المتصفح</string>
 
     <string name="language_title">اللغة</string>
+    <string name="theme_title">المظهر</string>
+    <string name="theme_body">الوضع الافتراضي يستخدم ألوان نظام أندرويد. تقدر تغيّر الوضع ولون التطبيق من هنا.</string>
+    <string name="theme_system">تلقائي</string>
+    <string name="theme_light">فاتح</string>
+    <string name="theme_dark">داكن</string>
+    <string name="theme_accent">لون التطبيق</string>
+    <string name="theme_custom_color">لون مخصص (#RRGGBB)</string>
     <string name="lang_system">تلقائي</string>
     <string name="lang_english">English</string>
     <string name="lang_arabic">العربية</string>
@@ -71,4 +82,36 @@
     <string name="setup_step_3">وجّه المشترك للجهاز ده مرة واحدة:</string>
     <string name="setup_step_4">كده خلصنا — المشترك هيتصل لوحده. مش محتاج تغيّر DNS الراوتر ولا تفتح أي منافذ.</string>
     <string name="setup_footer">تطبيق الأندرويد بيستخدم نفس واجهة JSON اللي بتستخدمها واجهة الويب.</string>
+
+    <string name="power_title">الطاقة</string>
+    <string name="power_body">الاستهلاك والسحب الحالي والتكلفة والتاريخ من نفس نقاط الويب.</string>
+    <string name="power_empty">ضيف أو جهز مشترك عشان تشوف تاريخ الطاقة.</string>
+    <string name="power_strip_select">المشترك</string>
+    <string name="power_today">اليوم</string>
+    <string name="power_live">السحب الحالي</string>
+    <string name="power_cost">تكلفة اليوم</string>
+    <string name="power_history">التاريخ</string>
+    <string name="power_no_history">مفيش تاريخ لسه. سيب السيرفر شغال عشان يجمع قراءات.</string>
+    <string name="activity_title">النشاط</string>
+    <string name="activity_body">أوامر الفيش والجدولة وتغييرات الاتصال.</string>
+    <string name="activity_empty_title">مفيش نشاط لسه</string>
+    <string name="activity_empty_body">تشغيل الفيش والجدولة وتغييرات الاتصال هتظهر هنا.</string>
+    <string name="notifications_title">التنبيهات</string>
+    <string name="notifications_body">تنبيهات الحمل والاتصال والجدولة من السيرفر.</string>
+    <string name="notifications_empty_title">مفيش تنبيهات لسه</string>
+    <string name="notifications_empty_body">تنبيهات SmartStrip المهمة هتظهر هنا.</string>
+    <string name="mark_all_read">علّم الكل كمقروء</string>
+    <string name="mark_read">علّم كمقروء</string>
+    <string name="delete">حذف</string>
+    <string name="automations_title">الأتمتة</string>
+    <string name="automations_body">إنشاء وإدارة أوامر الفيش حسب الوقت.</string>
+    <string name="automations_empty_title">مفيش أتمتة لسه</string>
+    <string name="automations_empty_body">اعمل قواعد لتشغيل أو إطفاء الفيش تلقائياً.</string>
+    <string name="new_automation">أتمتة مسائية جديدة</string>
+    <string name="all_outlets">كل الفيش</string>
+    <string name="enabled">مفعّل</string>
+    <string name="disabled">متوقف</string>
+    <string name="run_now">شغّل الآن</string>
+    <string name="enable">تفعيل</string>
+    <string name="disable">إيقاف</string>
 </resources>

@@ -57,6 +57,46 @@ object Server {
     val base: String get() = serverUrl
 }
 
+
+/** Local app appearance. This is kept on-device so the Android app can switch instantly. */
+object AppTheme {
+    const val SYSTEM = "system"
+    const val LIGHT = "light"
+    const val DARK = "dark"
+    const val DEFAULT_ACCENT = "#1B6B45"
+
+    var mode by mutableStateOf(SYSTEM)
+        private set
+    var accentColor by mutableStateOf(DEFAULT_ACCENT)
+        private set
+
+    private var prefs: SharedPreferences? = null
+
+    fun init(context: Context) {
+        val p = context.applicationContext.getSharedPreferences("powerk", Context.MODE_PRIVATE)
+        prefs = p
+        mode = p.getString("themeMode", SYSTEM).orEmpty().ifBlank { SYSTEM }
+            .takeIf { it == SYSTEM || it == LIGHT || it == DARK } ?: SYSTEM
+        accentColor = normalizeColor(p.getString("accentColor", DEFAULT_ACCENT).orEmpty())
+    }
+
+    fun set(value: String) {
+        mode = value.takeIf { it == SYSTEM || it == LIGHT || it == DARK } ?: SYSTEM
+        prefs?.edit()?.putString("themeMode", mode)?.apply()
+    }
+
+    fun setAccent(value: String) {
+        accentColor = normalizeColor(value)
+        prefs?.edit()?.putString("accentColor", accentColor)?.apply()
+    }
+
+    private fun normalizeColor(value: String): String {
+        val cleaned = value.trim().uppercase()
+        val withHash = if (cleaned.startsWith("#")) cleaned else "#$cleaned"
+        return if (Regex("^#[0-9A-F]{6}$").matches(withHash)) withHash else DEFAULT_ACCENT
+    }
+}
+
 /** In-app language: null follows the phone language. */
 object Lang {
     var code: String? = null

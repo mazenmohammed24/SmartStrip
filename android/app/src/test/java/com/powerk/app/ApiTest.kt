@@ -63,15 +63,15 @@ class ApiTest {
     @Test
     fun outletsAreLookedUpByNumberNotListPosition() {
         val outlets = listOf(
-            Outlet(n = 1, on = true, powerW = 1.0, energyKwh = 0.1, tempC = 30),
-            Outlet(n = 2, on = false, powerW = 2.0, energyKwh = 0.2, tempC = 31),
-            Outlet(n = 3, on = false, powerW = 3.0, energyKwh = 0.3, tempC = 32),
-            Outlet(n = 4, on = true, powerW = 4.0, energyKwh = 0.4, tempC = 33),
+            Outlet(n = 1, on = true, powerW = 1.0, energyKwh = 0.1, tempC = 30, icon = "lamp"),
+            Outlet(n = 2, on = false, powerW = 2.0, energyKwh = 0.2, tempC = 31, icon = "plug"),
+            Outlet(n = 3, on = false, powerW = 3.0, energyKwh = 0.3, tempC = 32, icon = "fridge"),
+            Outlet(n = 4, on = true, powerW = 4.0, energyKwh = 0.4, tempC = 33, icon = "heater"),
         )
         val strip = Strip(
             mac = "88D0391C0C4C", name = "LG+ Power", model = "lgutap", fw = "0.1.54-1.0.66",
             online = true, on = true, powerW = 10.0, energyKwh = 1.0,
-            voltage = 221.0, currentA = 0.1, rssi = -53, outlets = outlets,
+            voltage = 221.0, currentA = 0.1, rssi = -53, icon = "power-strip", outlets = outlets,
         )
 
         // outlet 4 is at list index 3: indexing the list by outlet number used to throw
