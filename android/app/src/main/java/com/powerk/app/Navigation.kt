@@ -23,19 +23,16 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ShortNavigationBar
 import androidx.compose.material3.ShortNavigationBarItem
 import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateMapOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -48,7 +45,6 @@ import com.powerk.app.screens.PowerScreen
 import com.powerk.app.screens.ScanScreen
 import com.powerk.app.screens.SettingsScreen
 import com.powerk.app.screens.StripDetailScreen
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private const val ROUTE_DASHBOARD = "dashboard"
@@ -64,49 +60,18 @@ private const val ROUTE_SCAN = "scan"
 @Composable
 fun PowerkNavigation() {
     val navController = rememberNavController()
-    var snapshot by remember { mutableStateOf<Snapshot?>(null) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var loading by remember { mutableStateOf(false) }
+    // Scoped to the Activity (PowerkNavigation() is the NavHost itself, not a destination inside
+    // one), so this is a single shared instance across every tab rather than one per back-stack
+    // entry. Its snapshot/loading/error/pending state is intentionally never read directly here -
+    // only this stable object reference is held - so the 5s poll inside it can only invalidate
+    // whichever composable(route) { ... } block below actually reads those properties (i.e. the
+    // tab currently on screen), not this whole Scaffold/bottom-nav/NavHost composable.
+    val stripsVm: StripsViewModel = viewModel()
     var selectedTab by remember { mutableIntStateOf(0) }
-    val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-    val pending = remember { mutableStateMapOf<String, Boolean>() }
 
     // unread notifications count for badge
     val unreadCount = 0 // will be updated when notifications load
-
-    suspend fun refresh() {
-        if (!Server.configured) return
-        loading = true
-        try { snapshot = Api.snapshot(Server.base, Server.token); error = null }
-        catch (e: Exception) { error = e.message ?: e.javaClass.simpleName; snapshot = null }
-        loading = false
-    }
-
-    LaunchedEffect(Unit) {
-        while (true) { refresh(); delay(5000) }
-    }
-
-    fun command(mac: String, outlet: Int, on: Boolean) {
-        val keys = if (outlet == 0) (1..4).map { "$mac:$it" } else listOf("$mac:$outlet")
-        if (keys.any { pending.containsKey(it) }) return
-        keys.forEach { pending[it] = on }
-        scope.launch {
-            try { Api.setOutlet(Server.base, Server.token, mac, outlet, on); refresh() }
-            catch (e: Exception) { snackbar.showSnackbar(e.message ?: "command failed") }
-            finally { keys.forEach { pending.remove(it) } }
-        }
-    }
-
-    fun updateIcon(mac: String, outlet: Int?, icon: String) {
-        scope.launch {
-            try {
-                if (outlet == null) Api.updateStripIcon(Server.base, Server.token, mac, icon)
-                else Api.updateOutletIcon(Server.base, Server.token, mac, outlet, icon)
-                refresh()
-            } catch (e: Exception) { snackbar.showSnackbar(e.message ?: "icon update failed") }
-        }
-    }
 
     val tabRoutes = listOf(ROUTE_DASHBOARD, ROUTE_POWER, ROUTE_AUTOMATIONS, ROUTE_ACTIVITY, ROUTE_NOTIFICATIONS, ROUTE_SETTINGS)
 
@@ -129,7 +94,7 @@ fun PowerkNavigation() {
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
             contentColor = MaterialTheme.colorScheme.onBackground,
-            snackbarHost = { SnackbarHost(snackbar) },
+            snackbarHost = { SnackbarHost(stripsVm.snackbar) },
             bottomBar = {
                 ShortNavigationBar {
                     ShortNavigationBarItem(
@@ -187,21 +152,21 @@ fun PowerkNavigation() {
                 composable(ROUTE_DASHBOARD) {
                     selectedTab = 0
                     DashboardScreen(
-                        snapshot = snapshot,
-                        error = error,
-                        loading = loading,
-                        pending = pending,
-                        onRefresh = { scope.launch { refresh() } },
+                        snapshot = stripsVm.snapshot,
+                        error = stripsVm.error,
+                        loading = stripsVm.loading,
+                        pending = stripsVm.pending,
+                        onRefresh = { scope.launch { stripsVm.refresh() } },
                         onOpenSettings = { selectedTab = 5; navigateToTab(ROUTE_SETTINGS) },
-                        onCommand = { mac, outlet, on -> command(mac, outlet, on) },
-                        onIconChange = { mac, outlet, icon -> updateIcon(mac, outlet, icon) },
+                        onCommand = { mac, outlet, on -> stripsVm.command(mac, outlet, on) },
+                        onIconChange = { mac, outlet, icon -> stripsVm.updateIcon(mac, outlet, icon) },
                         onStripTap = { mac -> navController.navigate("strip/$mac") },
                         onScan = { navController.navigate(ROUTE_SCAN) },
                     )
                 }
-                composable(ROUTE_POWER) { selectedTab = 1; PowerScreen(snapshot) }
-                composable(ROUTE_AUTOMATIONS) { selectedTab = 2; AutomationsScreen(snapshot) }
-                composable(ROUTE_ACTIVITY) { selectedTab = 3; ActivityScreen(snapshot) }
+                composable(ROUTE_POWER) { selectedTab = 1; PowerScreen(stripsVm.snapshot) }
+                composable(ROUTE_AUTOMATIONS) { selectedTab = 2; AutomationsScreen(stripsVm.snapshot) }
+                composable(ROUTE_ACTIVITY) { selectedTab = 3; ActivityScreen(stripsVm.snapshot) }
                 composable(ROUTE_NOTIFICATIONS) { selectedTab = 4; NotificationsScreen() }
                 composable(ROUTE_SETTINGS) { selectedTab = 5; SettingsScreen() }
                 composable("strip/{mac}") { backStack ->
@@ -210,7 +175,7 @@ fun PowerkNavigation() {
                 }
                 composable(ROUTE_SCAN) {
                     ScanScreen(onStripAdopted = {
-                        scope.launch { refresh() }
+                        scope.launch { stripsVm.refresh() }
                         navController.popBackStack()
                     })
                 }
