@@ -423,35 +423,41 @@ fun SettingsScreen() {
                                 connectingAp = true
                                 reconnecting = false
                                 provisionStatus = context.getString(R.string.provision_connecting_strip, strip.ssid)
-                                WifiHelper.autoReconnectEnabled = true
 
-                                fun doConnect() {
-                                    scope.launch {
-                                        val network = WifiHelper.connectToStripAp(
-                                            context = context,
-                                            ssid = strip.ssid,
-                                            onLost = {
-                                                // Called on the callback thread when Android drops the link
-                                                if (WifiHelper.autoReconnectEnabled && provisionStep <= 2) {
-                                                    reconnecting = true
-                                                    doConnect()
+                                scope.launch {
+                                    val network = WifiHelper.connectToStripAp(
+                                        context = context,
+                                        ssid = strip.ssid,
+                                        onLost = {
+                                            // Only fires after a real connection was established.
+                                            // Silently re-request the same network — no dialog shown
+                                            // for a network Android already approved this session.
+                                            if (provisionStep in 1..2) {
+                                                reconnecting = true
+                                                scope.launch {
+                                                    val recon = WifiHelper.connectToStripAp(
+                                                        context = context,
+                                                        ssid = strip.ssid,
+                                                    )
+                                                    reconnecting = false
+                                                    if (recon == null) {
+                                                        provisionStatus = "Reconnection to strip AP failed. Move closer and try again."
+                                                    }
                                                 }
-                                            },
-                                        )
-                                        reconnecting = false
-                                        if (network == null) {
-                                            provisionStatus = context.getString(R.string.provision_connect_strip_failed)
-                                            provisionOk = false
-                                        } else {
-                                            boundStripNetwork = network
-                                            provisionStatus = null
-                                            provisionOk = true
-                                            provisionStep = 1
-                                        }
-                                        connectingAp = false
+                                            }
+                                        },
+                                    )
+                                    if (network == null) {
+                                        provisionStatus = context.getString(R.string.provision_connect_strip_failed)
+                                        provisionOk = false
+                                    } else {
+                                        boundStripNetwork = network
+                                        provisionStatus = null
+                                        provisionOk = true
+                                        provisionStep = 1
                                     }
+                                    connectingAp = false
                                 }
-                                doConnect()
                             },
                             enabled = selectedStrip != null && !scanning && !provisionBusy && !connectingAp,
                             modifier = Modifier.fillMaxWidth(),

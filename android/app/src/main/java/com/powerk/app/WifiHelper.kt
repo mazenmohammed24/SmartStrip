@@ -141,18 +141,20 @@ object WifiHelper {
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
                 Log.i("WifiHelper", "onAvailable: $network")
-                // Store the live connection so it survives the coroutine.
                 activeConnection.set(StripConnection(network, this, cm))
-                // Bind immediately so all traffic goes over the strip AP.
                 cm.bindProcessToNetwork(network)
+                // Only arm auto-reconnect after a real connection is established.
+                autoReconnectEnabled = true
                 deferred.complete(network)
             }
             override fun onUnavailable() {
                 Log.w("WifiHelper", "onUnavailable")
+                // Never completed means the system dialog was cancelled or timed out.
                 deferred.complete(null)
             }
             override fun onLost(network: Network) {
                 Log.w("WifiHelper", "onLost: $network autoReconnect=$autoReconnectEnabled")
+                // Only notify if we had a real connection first.
                 if (autoReconnectEnabled) onLost?.invoke()
             }
         }
