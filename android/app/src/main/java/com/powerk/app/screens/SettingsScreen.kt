@@ -5,6 +5,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,6 +13,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -48,6 +51,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.powerk.app.Api
@@ -55,10 +63,46 @@ import com.powerk.app.AppTheme
 import com.powerk.app.Lang
 import com.powerk.app.R
 import com.powerk.app.Server
+import com.powerk.app.StripApType
 import com.powerk.app.WifiHelper
 import com.powerk.app.WifiScanResult
 import com.powerk.app.components.ProvisionWizardSteps
 import kotlinx.coroutines.launch
+
+/** Draws a Wi-Fi arc icon with 1–3 arcs lit based on [rssi] (dBm), matching Android's signal levels. */
+@Composable
+private fun WifiStrengthIcon(rssi: Int, modifier: Modifier = Modifier) {
+    val bars = when {
+        rssi >= -55 -> 3
+        rssi >= -70 -> 2
+        else        -> 1
+    }
+    val activeColor   = MaterialTheme.colorScheme.primary
+    val inactiveColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)
+    Canvas(modifier = modifier) {
+        val cx = size.width / 2f
+        val cy = size.height * 0.85f
+        val strokeW = size.width * 0.13f
+        val startAngle = 210f
+        val sweepAngle = 120f
+        // 3 arc radii, smallest → largest
+        val radii = listOf(size.width * 0.22f, size.width * 0.42f, size.width * 0.62f)
+        radii.forEachIndexed { i, r ->
+            val color = if (i < bars) activeColor else inactiveColor
+            drawArc(
+                color = color,
+                startAngle = startAngle,
+                sweepAngle = sweepAngle,
+                useCenter = false,
+                topLeft = Offset(cx - r, cy - r),
+                size = androidx.compose.ui.geometry.Size(r * 2, r * 2),
+                style = Stroke(width = strokeW, cap = StrokeCap.Round),
+            )
+        }
+        // centre dot
+        drawCircle(color = activeColor, radius = strokeW * 0.6f, center = Offset(cx, cy))
+    }
+}
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -76,10 +120,17 @@ fun SettingsScreen() {
     var provisionStep by remember { mutableIntStateOf(0) }
     var provisionBusy by remember { mutableStateOf(false) }
     var provisionSsid by remember { mutableStateOf("") }
+    var provisionPassword by remember { mutableStateOf("") }
+    var selectedStrip by remember { mutableStateOf<WifiScanResult?>(null) }
+    var connectingAp by remember { mutableStateOf(false) }
+    var boundStripNetwork by remember { mutableStateOf<android.net.Network?>(null) }
     var provisionStatus by remember { mutableStateOf<String?>(null) }
     var provisionOk by remember { mutableStateOf(false) }
     var stripNetworks by remember { mutableStateOf<List<WifiScanResult>>(emptyList()) }
     var scanning by remember { mutableStateOf(false) }
+    var foundStripIp by remember { mutableStateOf<String?>(null) }
+
+    val isStandalone = selectedStrip?.type == StripApType.STANDALONE
 
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -98,22 +149,89 @@ fun SettingsScreen() {
     LaunchedEffect(hasLocationPermission) {
         if (hasLocationPermission) {
             val ssid = WifiHelper.getCurrentSsid(context)
-            if (ssid.isNotBlank() && !ssid.startsWith("TONLY_TAP_")) provisionSsid = ssid
+            if (ssid.isNotBlank() && ssid != "MTTL-W01-SETUP" && !ssid.startsWith("TONLY_TAP_")) {
+                provisionSsid = ssid
+            }
         }
     }
 
     fun doScan() {
+        if (!hasLocationPermission) {
+            permissionLauncher.launch(android.Manifest.permission.ACCESS_FINE_LOCATION)
+            return
+        }
         scope.launch {
             scanning = true
+            provisionStatus = context.getString(R.string.provision_scanning)
+            val currentSsid = WifiHelper.getCurrentSsid(context)
+            if (currentSsid.isNotBlank() && currentSsid != "MTTL-W01-SETUP" && !currentSsid.startsWith("TONLY_TAP_")) {
+                provisionSsid = currentSsid
+            }
             stripNetworks = WifiHelper.scanForStripNetworks(context)
+            selectedStrip = stripNetworks.firstOrNull()
+            provisionStatus = if (stripNetworks.isEmpty()) context.getString(R.string.provision_no_strips_found) else null
+            provisionOk = stripNetworks.isNotEmpty()
             scanning = false
         }
     }
 
     fun commit() = Server.save(serverUrl, token)
 
+    fun resetWizard() {
+        WifiHelper.releaseStripNetwork(context)
+        boundStripNetwork = null
+        provisionStep = 0
+        provisionStatus = null
+        provisionOk = false
+        provisionPassword = ""
+        foundStripIp = null
+        showWizard = false
+    }
+
+    fun finishProvision() {
+        provisionBusy = true
+        provisionStatus = context.getString(R.string.provision_sending)
+        val standalone = isStandalone
+        scope.launch {
+            try {
+                boundStripNetwork?.let { WifiHelper.bindProcessToNetwork(context, it) }
+                Api.configureStripWifi(
+                    ssid = provisionSsid.trim(),
+                    password = provisionPassword,
+                    standalone = standalone,
+                )
+                WifiHelper.releaseStripNetwork(context)
+                boundStripNetwork = null
+                provisionStatus = context.getString(R.string.provision_waiting_registration)
+                if (standalone) {
+                    // Strip will reconnect to home Wi-Fi; scan LAN to find it
+                    val ip = Api.waitForStandaloneStrip()
+                    if (ip != null) {
+                        foundStripIp = ip
+                        provisionStatus = "Strip online at http://$ip — open its web UI to control outlets."
+                        provisionOk = true
+                    } else {
+                        provisionStatus = "Wi-Fi sent. Strip should appear on your home network shortly. Check your router for MTTL-W01."
+                        provisionOk = true
+                    }
+                } else {
+                    val result = Api.waitForRegistration(Server.base, Server.token)
+                    provisionStatus = result.message
+                    provisionOk = result.registered
+                }
+            } catch (e: Exception) {
+                WifiHelper.releaseStripNetwork(context)
+                boundStripNetwork = null
+                provisionStatus = e.message ?: "Provision failed"
+                provisionOk = false
+            }
+            provisionBusy = false
+            provisionStep = 4
+        }
+    }
+
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).imePadding().navigationBarsPadding().padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text(stringResource(R.string.settings_title), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
@@ -212,48 +330,188 @@ fun SettingsScreen() {
                             }
                         }
                     }
+
                     ProvisionWizardSteps(currentStep = provisionStep, busy = provisionBusy)
+
+                    // Step 0: Scan & connect to strip AP
                     if (provisionStep == 0) {
-                        FilledTonalButton(onClick = { doScan() }, enabled = hasLocationPermission && !scanning && !provisionBusy, modifier = Modifier.fillMaxWidth()) {
-                            Icon(Icons.Filled.Refresh, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text(stringResource(R.string.provision_step_1_action))
+                        Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
+                            Text(
+                                stringResource(R.string.provision_step_0_hint),
+                                Modifier.padding(12.dp),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
                         }
-                        if (scanning) CircularWavyProgressIndicator(Modifier.fillMaxWidth())
-                        Text(stringResource(R.string.provision_step_1_found, stripNetworks.size), style = MaterialTheme.typography.bodySmall)
-                        Button(onClick = {
-                            provisionStep = 1
-                        }, enabled = !scanning && !provisionBusy && stripNetworks.isNotEmpty(), modifier = Modifier.fillMaxWidth()) {
-                            Text(stringResource(R.string.provision_next))
+                        FilledTonalButton(
+                            onClick = { doScan() },
+                            enabled = !scanning && !provisionBusy && !connectingAp,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(Icons.Filled.Refresh, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(R.string.provision_step_1_action))
                         }
-                    } else if (provisionStep == 1) {
-                        OutlinedTextField(value = provisionSsid, onValueChange = { provisionSsid = it }, label = { Text(stringResource(R.string.provision_ssid)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                        Button(onClick = { provisionStep = 2 }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.provision_next)) }
-                    } else if (provisionStep == 2) {
-                        Text(stringResource(R.string.provision_step_3_body), style = MaterialTheme.typography.bodySmall)
-                        Button(onClick = {
-                            provisionStep = 3; provisionBusy = true
-                            scope.launch {
-                                try {
-                                    val firstSsid = stripNetworks.firstOrNull()?.ssid ?: ""
-                                    val password = firstSsid.removePrefix("TONLY_TAP_").let { mac ->
-                                        "mttl" + mac.replace(":", "").lowercase().takeLast(6)
-                                    }
-                                    Api.provisionAndRegister(Server.base, Server.token, Server.host, provisionSsid, password)
-                                    provisionStatus = context.getString(R.string.provision_ok); provisionOk = true
-                                } catch (e: Exception) {
-                                    provisionStatus = e.message ?: "provision failed"; provisionOk = false
-                                }
-                                provisionBusy = false
+                        if (scanning || connectingAp) CircularWavyProgressIndicator(Modifier.fillMaxWidth())
+                        Text(
+                            stringResource(R.string.provision_step_1_found, stripNetworks.size),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        stripNetworks.forEach { network ->
+                            val typeTag = if (network.type == StripApType.STANDALONE) "standalone" else "stock"
+                            val selected = selectedStrip?.ssid == network.ssid
+                            OutlinedButton(
+                                onClick = { selectedStrip = network },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                WifiStrengthIcon(network.rssi, modifier = Modifier.size(22.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    (if (selected) "✓  " else "") + network.ssid,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    typeTag,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
                             }
-                        }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.provision_send)) }
-                    } else {
+                        }
+                        Button(
+                            onClick = {
+                                val strip = selectedStrip ?: return@Button
+                                connectingAp = true
+                                provisionStatus = context.getString(R.string.provision_connecting_strip, strip.ssid)
+                                scope.launch {
+                                    val network = WifiHelper.connectToStripAp(context, strip.ssid)
+                                    if (network == null) {
+                                        provisionStatus = context.getString(R.string.provision_connect_strip_failed)
+                                        provisionOk = false
+                                    } else {
+                                        boundStripNetwork = network
+                                        WifiHelper.bindProcessToNetwork(context, network)
+                                        provisionStatus = null
+                                        provisionOk = true
+                                        provisionStep = 1
+                                    }
+                                    connectingAp = false
+                                }
+                            },
+                            enabled = selectedStrip != null && !scanning && !provisionBusy && !connectingAp,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(stringResource(R.string.provision_step_1_button))
+                        }
+                    }
+
+                    // Step 1: Enter home Wi-Fi credentials
+                    else if (provisionStep == 1) {
+                        Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
+                            Text(
+                                if (isStandalone) stringResource(R.string.provision_step_1_standalone_hint)
+                                else stringResource(R.string.provision_step_1_stock_hint),
+                                Modifier.padding(12.dp),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                            OutlinedTextField(
+                                value = provisionSsid,
+                                onValueChange = { provisionSsid = it },
+                                label = { Text(stringResource(R.string.field_wifi_ssid)) },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            OutlinedTextField(
+                                value = provisionPassword,
+                                onValueChange = { provisionPassword = it },
+                                label = { Text(stringResource(R.string.field_wifi_password)) },
+                                singleLine = true,
+                                visualTransformation = PasswordVisualTransformation(),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                        Button(
+                            onClick = { provisionStep = 2 },
+                            enabled = provisionSsid.isNotBlank() && provisionPassword.isNotBlank(),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(stringResource(R.string.provision_next)) }
+                    }
+
+                    // Step 2: Confirm and send
+                    else if (provisionStep == 2) {
+                        Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(stringResource(R.string.provision_step_2_confirm), style = MaterialTheme.typography.labelLarge)
+                                Text("• Network: $provisionSsid", style = MaterialTheme.typography.bodySmall)
+                                Text(
+                                    if (isStandalone) "• Mode: standalone firmware (MTTL-W01-SETUP)"
+                                    else "• Mode: stock firmware (TONLY_TAP_*)",
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                                if (!isStandalone) {
+                                    Text("• Method: TCP setup to 192.168.1.1:30300", style = MaterialTheme.typography.bodySmall)
+                                } else {
+                                    Text("• Method: HTTP POST to http://192.168.4.1/wifi", style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
+                        Button(
+                            onClick = { provisionStep = 3; finishProvision() },
+                            enabled = !provisionBusy,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(stringResource(R.string.provision_send)) }
+                    }
+
+                    // Step 3: Sending / waiting
+                    else if (provisionStep == 3) {
                         if (provisionBusy) CircularWavyProgressIndicator(Modifier.fillMaxWidth())
+                    }
+
+                    // Step 4: Done
+                    else {
                         provisionStatus?.let { msg ->
-                            Surface(shape = MaterialTheme.shapes.medium, color = if (provisionOk) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
+                            Surface(
+                                shape = MaterialTheme.shapes.medium,
+                                color = if (provisionOk) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer,
+                                contentColor = if (provisionOk) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
                                 Text(msg, Modifier.padding(14.dp), style = MaterialTheme.typography.bodyMedium)
                             }
                         }
+                        foundStripIp?.let { ip ->
+                            OutlinedButton(
+                                onClick = {
+                                    context.startActivity(
+                                        android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("http://$ip"))
+                                    )
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text("Open strip web UI (http://$ip)") }
+                        }
                         if (!provisionBusy) {
-                            OutlinedButton(onClick = { provisionStep = 0; provisionStatus = null; provisionOk = false; showWizard = false }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.provision_done)) }
+                            OutlinedButton(
+                                onClick = { resetWizard() },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text(stringResource(R.string.provision_done)) }
+                        }
+                    }
+
+                    // Status banner (shown during steps 0–3)
+                    if (provisionStep < 4) {
+                        AnimatedVisibility(visible = provisionStatus != null, enter = fadeIn(), exit = fadeOut()) {
+                            Surface(
+                                shape = MaterialTheme.shapes.medium,
+                                color = if (provisionOk) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer,
+                                contentColor = if (provisionOk) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(provisionStatus ?: "", Modifier.padding(14.dp), style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+                        OutlinedButton(onClick = { resetWizard() }, modifier = Modifier.fillMaxWidth()) {
+                            Text(stringResource(R.string.provision_start_over))
                         }
                     }
                 }
