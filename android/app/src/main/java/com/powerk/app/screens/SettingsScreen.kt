@@ -219,45 +219,132 @@ fun SettingsScreen() {
         showWizard = false
     }
 
-    fun finishProvision() {
+    // Sends the home Wi-Fi credentials and waits for registration. Called directly (not via a
+    // separate scope.launch) from the connect success path so it runs in the same coroutine with
+    // no extra scheduling gap — every millisecond matters here, since some OEM Wi-Fi managers
+    // (e.g. Huawei's WifiPro) silently roam the radio back off the strip AP within ~100-900ms of
+    // it becoming "available", regardless of any user-visible Wi-Fi+ toggle.
+    suspend fun sendWifiAndWait() {
         provisionBusy = true
+        provisionStep = 2
         provisionStatus = context.getString(R.string.provision_sending)
         val standalone = isStandalone
-        scope.launch {
-            try {
-                boundStripNetwork?.let { WifiHelper.bindProcessToNetwork(context, it) }
-                Api.configureStripWifi(
-                    ssid = provisionSsid.trim(),
-                    password = provisionPassword,
-                    standalone = standalone,
-                )
-                WifiHelper.releaseStripNetwork(context)
-                boundStripNetwork = null
-                provisionStatus = context.getString(R.string.provision_waiting_registration)
-                if (standalone) {
-                    // Strip will reconnect to home Wi-Fi; scan LAN to find it
-                    val ip = Api.waitForStandaloneStrip()
-                    if (ip != null) {
-                        foundStripIp = ip
-                        provisionStatus = "Strip online at http://$ip — open its web UI to control outlets."
-                        provisionOk = true
-                    } else {
-                        provisionStatus = "Wi-Fi sent. Strip should appear on your home network shortly. Check your router for MTTL-W01."
-                        provisionOk = true
-                    }
+        try {
+            // Keep process-wide binding as a fallback, but configureStripWifi now also binds its
+            // own socket/connection directly to boundStripNetwork, which is the part that
+            // actually matters if an OEM Wi-Fi manager changes the process-wide default mid-race.
+            boundStripNetwork?.let { WifiHelper.bindProcessToNetwork(context, it) }
+            Api.configureStripWifi(
+                ssid = provisionSsid.trim(),
+                password = provisionPassword,
+                standalone = standalone,
+                network = boundStripNetwork,
+            )
+            WifiHelper.releaseStripNetwork(context)
+            boundStripNetwork = null
+            provisionStatus = context.getString(R.string.provision_waiting_registration)
+            if (standalone) {
+                // Strip will reconnect to home Wi-Fi; scan LAN to find it
+                val ip = Api.waitForStandaloneStrip()
+                if (ip != null) {
+                    foundStripIp = ip
+                    provisionStatus = "Strip online at http://$ip — open its web UI to control outlets."
+                    provisionOk = true
                 } else {
-                    val result = Api.waitForRegistration(Server.base, Server.token)
-                    provisionStatus = result.message
-                    provisionOk = result.registered
+                    provisionStatus = "Wi-Fi sent. Strip should appear on your home network shortly. Check your router for MTTL-W01."
+                    provisionOk = true
                 }
-            } catch (e: Exception) {
-                WifiHelper.releaseStripNetwork(context)
-                boundStripNetwork = null
-                provisionStatus = e.message ?: "Provision failed"
-                provisionOk = false
+            } else {
+                val result = Api.waitForRegistration(Server.base, Server.token)
+                provisionStatus = result.message
+                provisionOk = result.registered
             }
-            provisionBusy = false
-            provisionStep = 4
+        } catch (e: Exception) {
+            WifiHelper.releaseStripNetwork(context)
+            boundStripNetwork = null
+            provisionStatus = e.message ?: "Provision failed"
+            provisionOk = false
+        }
+        provisionBusy = false
+        provisionStep = 3
+    }
+
+    // Connects to the selected strip AP and immediately sends the already-collected Wi-Fi
+    // credentials. Extracted so both the step-1 button and the step-3 "Retry" button (which
+    // keeps all entered data and just re-attempts the race) can trigger the exact same flow.
+    fun attemptConnectAndSend() {
+        val strip = selectedStrip ?: return
+        connectingAp = true
+        connectAttempted = true
+        reconnecting = false
+        provisionOk = false
+        provisionStatus = context.getString(R.string.provision_connecting_strip, strip.ssid)
+
+        scope.launch {
+            val network = WifiHelper.connectToStripAp(
+                context = context,
+                ssid = strip.ssid,
+                onLost = { fastRoamBack ->
+                    // Only react while still in the "connecting" sub-phase
+                    // (provisionStep == 1, before sendWifiAndWait has moved
+                    // us to step 2). Once sending has started, ignore onLost
+                    // entirely and let the send's own try/catch decide
+                    // success/failure — resetting here too would race with it.
+                    if (provisionStep == 1) {
+                        if (fastRoamBack) {
+                            // The OS instantly roamed back to a known network
+                            // (e.g. Huawei Wi-Fi+). Retrying immediately would
+                            // just pop another system dialog in a loop — surface
+                            // guidance and let the user retry manually instead.
+                            // Unregister the callback now: leaving it registered
+                            // keeps the system "connect to network" dialog
+                            // reappearing to try to re-satisfy the dead request.
+                            WifiHelper.releaseStripNetwork(context)
+                            reconnecting = false
+                            connectAttempted = false
+                            boundStripNetwork = null
+                            provisionOk = false
+                            provisionStatus = WifiHelper.fastRoamBackMessage()
+                        } else {
+                            reconnecting = true
+                            scope.launch {
+                                val recon = WifiHelper.connectToStripAp(
+                                    context = context,
+                                    ssid = strip.ssid,
+                                )
+                                reconnecting = false
+                                if (recon == null) {
+                                    WifiHelper.releaseStripNetwork(context)
+                                    connectAttempted = false
+                                    boundStripNetwork = null
+                                    provisionOk = false
+                                    provisionStatus = "Reconnection to strip AP failed. Move closer and try again."
+                                } else {
+                                    // Reconnected — send immediately, same as
+                                    // the initial success path, to stay inside
+                                    // the brief connectivity window.
+                                    boundStripNetwork = recon
+                                    provisionOk = true
+                                    sendWifiAndWait()
+                                }
+                            }
+                        }
+                    }
+                },
+            )
+            connectingAp = false
+            if (network == null) {
+                provisionStatus = context.getString(R.string.provision_connect_strip_failed)
+                provisionOk = false
+                connectAttempted = false
+            } else {
+                boundStripNetwork = network
+                provisionOk = true
+                // Send the already-collected home Wi-Fi credentials right away,
+                // in the same coroutine, to minimize the gap between the strip
+                // AP becoming available and the setup request reaching it.
+                sendWifiAndWait()
+            }
         }
     }
 
@@ -364,8 +451,46 @@ fun SettingsScreen() {
 
                     ProvisionWizardSteps(currentStep = provisionStep, busy = provisionBusy)
 
-                    // Step 0: Scan & connect to strip AP
+                    // Step 0: Enter home Wi-Fi credentials first. Collecting these before we ever
+                    // touch the strip AP lets the connect-and-send that follows be atomic, which
+                    // matters because some OEM Wi-Fi managers (e.g. Huawei's WifiPro) silently
+                    // roam the radio back off a no-internet AP within ~100-900ms of it connecting.
                     if (provisionStep == 0) {
+                        Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
+                            Text(
+                                stringResource(R.string.provision_home_wifi_hint),
+                                Modifier.padding(12.dp),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                            OutlinedTextField(
+                                value = provisionSsid,
+                                onValueChange = { provisionSsid = it },
+                                label = { Text(stringResource(R.string.field_wifi_ssid)) },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            OutlinedTextField(
+                                value = provisionPassword,
+                                onValueChange = { provisionPassword = it },
+                                label = { Text(stringResource(R.string.field_wifi_password)) },
+                                singleLine = true,
+                                visualTransformation = PasswordVisualTransformation(),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                        Button(
+                            onClick = { provisionStep = 1 },
+                            enabled = provisionSsid.isNotBlank() && provisionPassword.isNotBlank(),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(stringResource(R.string.provision_next)) }
+                    }
+
+                    // Step 1: Scan, select the strip AP, then connect & send Wi-Fi atomically —
+                    // in one tap, with no separate "confirm" step, to minimize the time the strip
+                    // AP connection needs to survive.
+                    else if (provisionStep == 1) {
                         Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
                             Text(
                                 stringResource(R.string.provision_step_0_hint),
@@ -449,69 +574,14 @@ fun SettingsScreen() {
                                 }
                             }
                         }
+                        Text(
+                            stringResource(R.string.provision_will_send, provisionSsid),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                         if (!connectAttempted) {
                         Button(
-                            onClick = {
-                                val strip = selectedStrip ?: return@Button
-                                connectingAp = true
-                                connectAttempted = true
-                                reconnecting = false
-                                provisionStatus = context.getString(R.string.provision_connecting_strip, strip.ssid)
-
-                                scope.launch {
-                                    val network = WifiHelper.connectToStripAp(
-                                        context = context,
-                                        ssid = strip.ssid,
-                                        onLost = { fastRoamBack ->
-                                            if (provisionStep in 1..2) {
-                                                if (fastRoamBack) {
-                                                    // The OS instantly roamed back to a known network
-                                                    // (e.g. Huawei Wi-Fi+). Retrying immediately would
-                                                    // just pop another system dialog in a loop — surface
-                                                    // guidance and let the user retry manually instead.
-                                                    // Unregister the callback now: leaving it registered
-                                                    // keeps the system "connect to network" dialog
-                                                    // reappearing to try to re-satisfy the dead request.
-                                                    WifiHelper.releaseStripNetwork(context)
-                                                    reconnecting = false
-                                                    connectAttempted = false
-                                                    boundStripNetwork = null
-                                                    provisionOk = false
-                                                    provisionStep = 0
-                                                    provisionStatus = WifiHelper.fastRoamBackMessage()
-                                                } else {
-                                                    reconnecting = true
-                                                    scope.launch {
-                                                        val recon = WifiHelper.connectToStripAp(
-                                                            context = context,
-                                                            ssid = strip.ssid,
-                                                        )
-                                                        reconnecting = false
-                                                        if (recon == null) {
-                                                            WifiHelper.releaseStripNetwork(context)
-                                                            connectAttempted = false
-                                                            boundStripNetwork = null
-                                                            provisionOk = false
-                                                            provisionStep = 0
-                                                            provisionStatus = "Reconnection to strip AP failed. Move closer and try again."
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        },
-                                    )
-                                    if (network == null) {
-                                        provisionStatus = context.getString(R.string.provision_connect_strip_failed)
-                                        provisionOk = false
-                                    } else {
-                                        boundStripNetwork = network
-                                        provisionStatus = null
-                                        provisionOk = true
-                                        provisionStep = 1
-                                    }
-                                    connectingAp = false
-                                }
-                            },
+                            onClick = { attemptConnectAndSend() },
                             enabled = selectedStrip != null && !scanning && !provisionBusy,
                             modifier = Modifier.fillMaxWidth(),
                         ) {
@@ -520,71 +590,12 @@ fun SettingsScreen() {
                         }
                     }
 
-                    // Step 1: Enter home Wi-Fi credentials
-                    else if (provisionStep == 1) {
-                        Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
-                            Text(
-                                if (isStandalone) stringResource(R.string.provision_step_1_standalone_hint)
-                                else stringResource(R.string.provision_step_1_stock_hint),
-                                Modifier.padding(12.dp),
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                            OutlinedTextField(
-                                value = provisionSsid,
-                                onValueChange = { provisionSsid = it },
-                                label = { Text(stringResource(R.string.field_wifi_ssid)) },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                            OutlinedTextField(
-                                value = provisionPassword,
-                                onValueChange = { provisionPassword = it },
-                                label = { Text(stringResource(R.string.field_wifi_password)) },
-                                singleLine = true,
-                                visualTransformation = PasswordVisualTransformation(),
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
-                        Button(
-                            onClick = { provisionStep = 2 },
-                            enabled = provisionSsid.isNotBlank() && provisionPassword.isNotBlank(),
-                            modifier = Modifier.fillMaxWidth(),
-                        ) { Text(stringResource(R.string.provision_next)) }
-                    }
-
-                    // Step 2: Confirm and send
+                    // Step 2: Sending / waiting
                     else if (provisionStep == 2) {
-                        Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
-                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(stringResource(R.string.provision_step_2_confirm), style = MaterialTheme.typography.labelLarge)
-                                Text("• Network: $provisionSsid", style = MaterialTheme.typography.bodySmall)
-                                Text(
-                                    if (isStandalone) "• Mode: standalone firmware (MTTL-W01-SETUP)"
-                                    else "• Mode: stock firmware (TONLY_TAP_*)",
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                                if (!isStandalone) {
-                                    Text("• Method: TCP setup to 192.168.1.1:30300", style = MaterialTheme.typography.bodySmall)
-                                } else {
-                                    Text("• Method: HTTP POST to http://192.168.4.1/wifi", style = MaterialTheme.typography.bodySmall)
-                                }
-                            }
-                        }
-                        Button(
-                            onClick = { provisionStep = 3; finishProvision() },
-                            enabled = !provisionBusy,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) { Text(stringResource(R.string.provision_send)) }
-                    }
-
-                    // Step 3: Sending / waiting
-                    else if (provisionStep == 3) {
                         if (provisionBusy) CircularWavyProgressIndicator(Modifier.fillMaxWidth())
                     }
 
-                    // Step 4: Done
+                    // Step 3: Done
                     else {
                         provisionStatus?.let { msg ->
                             Surface(
@@ -607,6 +618,23 @@ fun SettingsScreen() {
                             ) { Text("Open strip web UI (http://$ip)") }
                         }
                         if (!provisionBusy) {
+                            // On failure, keep the already-entered Wi-Fi/strip selection and let
+                            // the user re-race the connect+send in one tap, instead of forcing a
+                            // full "Start over" (re-type SSID/password) for what is often just a
+                            // timing loss against the OS. Both are available.
+                            if (!provisionOk) {
+                                Button(
+                                    onClick = {
+                                        connectAttempted = false
+                                        reconnecting = false
+                                        WifiHelper.releaseStripNetwork(context)
+                                        boundStripNetwork = null
+                                        provisionStep = 1
+                                        attemptConnectAndSend()
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) { Text(stringResource(R.string.provision_retry)) }
+                            }
                             OutlinedButton(
                                 onClick = { resetWizard() },
                                 modifier = Modifier.fillMaxWidth(),
@@ -614,8 +642,8 @@ fun SettingsScreen() {
                         }
                     }
 
-                    // Status banner (shown during steps 0–3)
-                    if (provisionStep < 4) {
+                    // Status banner (shown during steps 0–2)
+                    if (provisionStep < 3) {
                         AnimatedVisibility(visible = provisionStatus != null, enter = fadeIn(), exit = fadeOut()) {
                             Surface(
                                 shape = MaterialTheme.shapes.medium,

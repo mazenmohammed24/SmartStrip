@@ -63,12 +63,14 @@
     <string name="provision_need_location">صلاحية الموقع مطلوبة للبحث عن شبكات Wi-Fi</string>
     <string name="grant_permission">منح الصلاحية</string>
     <string name="provision_home_ssid_hint">تم اكتشاف: %1$s</string>
-    <string name="provision_wizard_1">الاتصال بشبكة المشترك</string>
-    <string name="provision_wizard_2">إضافة واي فاي البيت</string>
-    <string name="provision_wizard_3">إضافة رابط السيرفر</string>
-    <string name="provision_wizard_4">إنهاء الإعداد والتسجيل</string>
+    <string name="provision_wizard_1">واي فاي البيت</string>
+    <string name="provision_wizard_2">الاتصال بالمشترك وإرسال الواي فاي</string>
+    <string name="provision_wizard_3">جاري الإرسال والانتظار</string>
+    <string name="provision_wizard_4">جاري الإرسال والانتظار</string>
+    <string name="provision_home_wifi_hint">ادخل اسم واي فاي البيت وكلمة المرور الأول. بعدين هتختار المشترك، والتطبيق هيتصل بيه ويبعتله بيانات الواي فاي في خطوة واحدة، لأن بعض الموبايلات (زي هواوي) بتقطع الاتصال بشبكة إعداد المشترك خلال أقل من ثانية.</string>
+    <string name="provision_will_send">هيتم إرسال: %1$s</string>
     <string name="provision_step_1_action">ابحث عن شبكات المشترك</string>
-    <string name="provision_step_1_button">اتصل بشبكة المشترك المختارة</string>
+    <string name="provision_step_1_button">اتصل بالمشترك وأرسل الواي فاي</string>
     <string name="provision_step_1_done">تم الاتصال بشبكة إعداد المشترك.</string>
     <string name="provision_step_1_failed">تعذر الاتصال بـ %1$s</string>
     <string name="provision_step_2_done">تم حفظ بيانات واي فاي البيت للمعالج.</string>
@@ -161,6 +163,7 @@
     <string name="provision_start">إعداد وصلة جديدة</string>
     <string name="provision_send">إرسال الإعدادات</string>
     <string name="provision_done">تم</string>
+    <string name="provision_retry">إعادة الاتصال والإرسال</string>
     <string name="provision_ok">تم إعداد الوصلة وتسجيلها!</string>
     <string name="provision_ssid">اسم الواي فاي المنزلي (SSID)</string>
     <string name="provision_step_3_body">جاهز لإرسال معلومات الواي فاي والسيرفر للوصلة. اضغط إرسال للبدء.</string>

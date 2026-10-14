@@ -348,21 +348,27 @@ object Api {
         ssid: String,
         password: String,
         standalone: Boolean,
+        network: android.net.Network? = null,
     ): String = withContext(Dispatchers.IO) {
         if (standalone) {
-            configureStandaloneWifi(ssid, password)
+            configureStandaloneWifi(ssid, password, network)
         } else {
-            configureStockWifi(ssid, password)
+            configureStockWifi(ssid, password, network)
         }
     }
 
-    private fun configureStandaloneWifi(ssid: String, password: String): String {
+    private fun configureStandaloneWifi(ssid: String, password: String, network: android.net.Network?): String {
         val url = URL("http://192.168.4.1/wifi")
         val body = "ssid=${java.net.URLEncoder.encode(ssid, "UTF-8")}&password=${java.net.URLEncoder.encode(password, "UTF-8")}"
-        val conn = url.openConnection() as HttpURLConnection
+        // Route this specific connection through the strip's network object rather than relying
+        // on process-wide bindProcessToNetwork, which some OEM Wi-Fi managers (e.g. Huawei
+        // WifiPro) can silently override mid-race. Network#openConnection is the robust,
+        // per-connection-scoped alternative recommended by the Android docs for this exact
+        // "connect briefly to a no-internet AP" scenario.
+        val conn = (network?.openConnection(url) ?: url.openConnection()) as HttpURLConnection
         try {
-            conn.connectTimeout = 6_000
-            conn.readTimeout = 10_000
+            conn.connectTimeout = 3_000
+            conn.readTimeout = 5_000
             conn.requestMethod = "POST"
             conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
             conn.doOutput = true
@@ -378,16 +384,42 @@ object Api {
         }
     }
 
-    private fun configureStockWifi(ssid: String, password: String): String {
+    private fun configureStockWifi(ssid: String, password: String, network: android.net.Network?): String {
         Log.i("SmartStripProvision", "configureStockWifi ssid=$ssid")
         validateProvisionInput(ssid, password)
-        val ipReply = setupCommand("up:ip:", "up:ip", false)
-        Log.i("SmartStripProvision", "ipReply=$ipReply")
-        val connectReply = setupCommand("up:connect:$ssid:$password", "up:connect", true)
-        Log.i("SmartStripProvision", "connectReply=$connectReply")
-        setupCommand("up:reboot:0", "up:reboot", false)
+        // Skip the informational "up:ip:" probe (its reply isn't used for anything) and send
+        // "up:connect" first. The strip AP connection has to survive a sequential TCP handshake
+        // with Android before OEM Wi-Fi managers (e.g. Huawei WifiPro) roam the radio away, so
+        // every round trip removed before the one command that actually matters meaningfully
+        // raises the odds of it landing in time.
+        var confirmed = true
+        val connectReply = try {
+            setupCommand("up:connect:$ssid:$password", "up:connect", true, network)
+        } catch (e: CommandSentUnconfirmed) {
+            // The command bytes were already handed to the strip (write+flush succeeded) before
+            // Android tore the radio down while we were waiting to read the ack — observed as
+            // the common failure point once the socket itself is network-bound. The strip almost
+            // certainly received and is acting on the credentials even though we never saw its
+            // reply, so treat this as a likely success instead of a hard failure: failing here
+            // just makes the user retry a step that, in all likelihood, already worked.
+            Log.w("SmartStripProvision", "up:connect sent but unconfirmed: ${e.message}")
+            confirmed = false
+            "up:connect:connect_ok"
+        }
+        Log.i("SmartStripProvision", "connectReply=$connectReply confirmed=$confirmed")
         if (!connectReply.contains("up:connect:connect_ok")) throw ServerException("The strip rejected the Wi-Fi settings")
-        return "Strip accepted Wi-Fi settings. Waiting for it to reconnect…"
+        // The strip already accepted the new Wi-Fi settings at this point and typically reboots
+        // on its own. Best-effort nudge it to reboot now, but don't fail the whole provisioning
+        // if the strip AP connection is already gone by the time this second command goes out —
+        // the critical part already succeeded.
+        runCatching { setupCommand("up:reboot:0", "up:reboot", false, network) }
+            .onFailure { Log.w("SmartStripProvision", "up:reboot failed (strip should still reboot on its own): ${it.message}") }
+        return if (confirmed) {
+            "Strip accepted Wi-Fi settings. Waiting for it to reconnect…"
+        } else {
+            "Wi-Fi settings were sent to the strip, but the connection dropped before it could " +
+                "confirm — it likely received them anyway. Waiting for it to reconnect…"
+        }
     }
 
     suspend fun waitForRegistration(base: String, token: String): ProvisionResult = withContext(Dispatchers.IO) {
@@ -643,22 +675,45 @@ object Api {
         }
     }
 
-    private fun setupCommand(command: String, label: String, sensitive: Boolean): String {
+    /** Thrown by [setupCommand] when the command bytes were already written+flushed to the
+     * strip before the connection died while waiting for its reply. Callers that know the
+     * command is likely to have taken effect regardless (e.g. "up:connect") can treat this more
+     * optimistically than a true send failure (where the strip never got the bytes at all). */
+    private class CommandSentUnconfirmed(message: String) : Exception(message)
+
+    private fun setupCommand(command: String, label: String, sensitive: Boolean, network: android.net.Network?): String {
+        var sent = false
         try {
-            Socket().use { socket ->
-                socket.connect(InetSocketAddress(MTTL_SETUP_HOST, MTTL_SETUP_PORT), 8_000)
-                socket.soTimeout = 12_000
-                val out = socket.getOutputStream()
-                val input = socket.getInputStream()
+            // Create the socket via the strip's Network object (when known) instead of a plain
+            // Socket() relying on process-wide bindProcessToNetwork. Process-wide binding can be
+            // silently overridden mid-race by OEM Wi-Fi managers (observed: Huawei WifiPro); a
+            // socket created from Network#socketFactory is scoped to that network at the kernel
+            // routing level regardless of what the process-wide default network changes to.
+            val socket = network?.socketFactory?.createSocket() ?: Socket()
+            socket.use {
+                // Short timeouts: a live connection to the strip (one Wi-Fi hop away) replies in
+                // well under a second. Failing fast here matters because the usual failure mode
+                // is the OS tearing down the strip AP mid-request (e.g. Huawei WifiPro roam-back)
+                // — a long timeout just wastes the user's time waiting to find out, instead of
+                // letting them tap "Retry connect & send" again quickly.
+                it.connect(InetSocketAddress(MTTL_SETUP_HOST, MTTL_SETUP_PORT), 2_500)
+                it.soTimeout = 4_000
+                val out = it.getOutputStream()
+                val input = it.getInputStream()
                 out.write("$command\r\n".toByteArray(Charsets.UTF_8))
                 out.flush()
-                socket.shutdownOutput()
+                // The bytes have left the phone at this point — a failure from here on (e.g.
+                // reading the reply) means the strip likely already has the command, even if we
+                // never find out for sure.
+                sent = true
+                it.shutdownOutput()
                 val bytes = ByteArray(1024)
                 val count = input.read(bytes)
                 return if (count > 0) String(bytes, 0, count, Charsets.UTF_8).trim() else ""
             }
         } catch (e: Exception) {
-            Log.e("SmartStripProvision", "setupCommand failed label=$label command=${if (sensitive) "***" else command}", e)
+            Log.e("SmartStripProvision", "setupCommand failed label=$label command=${if (sensitive) "***" else command} sent=$sent", e)
+            if (sent) throw CommandSentUnconfirmed(e.message ?: "connection dropped after sending")
             val target = "$MTTL_SETUP_HOST:$MTTL_SETUP_PORT"
             val hint = "Join this phone to the strip setup Wi-Fi (TONLY_TAP_*, password LGU_*) and try again."
             throw ServerException("Could not send $label to $target. ${e.message ?: ""} $hint")

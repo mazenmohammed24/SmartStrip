@@ -143,7 +143,6 @@ fun ProvisionWizardSteps(currentStep: Int, busy: Boolean) {
         stringResource(R.string.provision_wizard_1),
         stringResource(R.string.provision_wizard_2),
         stringResource(R.string.provision_wizard_3),
-        stringResource(R.string.provision_wizard_4),
     )
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         labels.forEachIndexed { index, label ->

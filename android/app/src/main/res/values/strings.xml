@@ -66,12 +66,14 @@
     <string name="provision_step_2_confirm">Confirm setup details</string>
     <string name="grant_permission">Grant permission</string>
     <string name="provision_home_ssid_hint">Detected: %1$s</string>
-    <string name="provision_wizard_1">Connect to strip AP</string>
-    <string name="provision_wizard_2">Home Wi-Fi</string>
-    <string name="provision_wizard_3">Confirm</string>
+    <string name="provision_wizard_1">Home Wi-Fi</string>
+    <string name="provision_wizard_2">Connect to strip &amp; send Wi-Fi</string>
+    <string name="provision_wizard_3">Sending &amp; waiting</string>
     <string name="provision_wizard_4">Sending &amp; waiting</string>
+    <string name="provision_home_wifi_hint">Enter your home Wi-Fi name and password first. Next you\'ll select and connect to the strip — the app connects and sends the Wi-Fi details together in one step, since some phones (e.g. Huawei) silently disconnect from the strip\'s setup network within a second.</string>
+    <string name="provision_will_send">Will send to the strip: %1$s</string>
     <string name="provision_step_1_action">Scan for strip APs</string>
-    <string name="provision_step_1_button">Connect to selected strip AP</string>
+    <string name="provision_step_1_button">Connect to strip &amp; send Wi-Fi</string>
     <string name="provision_step_1_done">Connected to the strip setup network.</string>
     <string name="provision_step_1_failed">Could not connect to %1$s</string>
     <string name="provision_step_2_done">Home Wi-Fi details saved for this wizard.</string>
@@ -164,6 +166,7 @@
     <string name="provision_start">Provision new strip</string>
     <string name="provision_send">Send configuration</string>
     <string name="provision_done">Done</string>
+    <string name="provision_retry">Retry connect &amp; send</string>
     <string name="provision_ok">Strip provisioned and registered!</string>
     <string name="provision_ssid">Home Wi-Fi name (SSID)</string>
     <string name="provision_step_3_body">Ready to send your home Wi-Fi and server info to the strip. Press send to start.</string>
