@@ -123,6 +123,7 @@ fun SettingsScreen() {
     var provisionPassword by remember { mutableStateOf("") }
     var selectedStrip by remember { mutableStateOf<WifiScanResult?>(null) }
     var connectingAp by remember { mutableStateOf(false) }
+    var connectAttempted by remember { mutableStateOf(false) }
     var boundStripNetwork by remember { mutableStateOf<android.net.Network?>(null) }
     var provisionStatus by remember { mutableStateOf<String?>(null) }
     var provisionOk by remember { mutableStateOf(false) }
@@ -183,6 +184,8 @@ fun SettingsScreen() {
         WifiHelper.releaseStripNetwork(context)
         boundStripNetwork = null
         reconnecting = false
+        connectingAp = false
+        connectAttempted = false
         provisionStep = 0
         provisionStatus = null
         provisionOk = false
@@ -378,7 +381,11 @@ fun SettingsScreen() {
                             val typeTag = if (isStandaloneNet) "standalone" else "stock"
                             val selected = selectedStrip?.ssid == network.ssid
                             OutlinedButton(
-                                onClick = { selectedStrip = network },
+                                onClick = {
+                                    selectedStrip = network
+                                    connectAttempted = false
+                                    provisionStatus = null
+                                },
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
                                 WifiStrengthIcon(network.rssi, modifier = Modifier.size(22.dp))
@@ -417,10 +424,12 @@ fun SettingsScreen() {
                                 }
                             }
                         }
+                        if (!connectAttempted) {
                         Button(
                             onClick = {
                                 val strip = selectedStrip ?: return@Button
                                 connectingAp = true
+                                connectAttempted = true
                                 reconnecting = false
                                 provisionStatus = context.getString(R.string.provision_connecting_strip, strip.ssid)
 
@@ -429,9 +438,6 @@ fun SettingsScreen() {
                                         context = context,
                                         ssid = strip.ssid,
                                         onLost = {
-                                            // Only fires after a real connection was established.
-                                            // Silently re-request the same network — no dialog shown
-                                            // for a network Android already approved this session.
                                             if (provisionStep in 1..2) {
                                                 reconnecting = true
                                                 scope.launch {
@@ -459,10 +465,11 @@ fun SettingsScreen() {
                                     connectingAp = false
                                 }
                             },
-                            enabled = selectedStrip != null && !scanning && !provisionBusy && !connectingAp,
+                            enabled = selectedStrip != null && !scanning && !provisionBusy,
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Text(stringResource(R.string.provision_step_1_button))
+                        }
                         }
                     }
 
