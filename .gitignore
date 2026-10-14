@@ -47,3 +47,8 @@ bin/
 .vs/
 *.user
 logcat_provision*.txt
+
+# On-device debug test artifacts (screenshots, uiautomator dumps, helper scripts)
+screen*.png
+ui*.xml
+parse_ui.py

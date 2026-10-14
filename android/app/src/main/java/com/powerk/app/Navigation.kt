@@ -36,6 +36,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -109,6 +110,21 @@ fun PowerkNavigation() {
 
     val tabRoutes = listOf(ROUTE_DASHBOARD, ROUTE_POWER, ROUTE_AUTOMATIONS, ROUTE_ACTIVITY, ROUTE_NOTIFICATIONS, ROUTE_SETTINGS)
 
+    // Standard bottom-nav pattern: pop up to (and save state for) the start destination, then
+    // restore state when returning to a previously-visited tab. Without this, every tab tap
+    // pushed a brand-new back-stack entry for that route with no popUpTo — the back stack grew
+    // unbounded, and each entry gets its own ViewModelStore, so any screen-scoped ViewModel (e.g.
+    // ProvisionViewModel) was silently recreated from scratch on every tab switch, which defeated
+    // the point of moving the provisioning wizard's state/coroutine into a ViewModel in the first
+    // place: it needs to survive switching tabs, not just surviving recomposition within one.
+    fun navigateToTab(route: String) {
+        navController.navigate(route) {
+            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+            launchSingleTop = true
+            restoreState = true
+        }
+    }
+
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
@@ -118,31 +134,31 @@ fun PowerkNavigation() {
                 ShortNavigationBar {
                     ShortNavigationBarItem(
                         selected = selectedTab == 0,
-                        onClick = { selectedTab = 0; navController.navigate(ROUTE_DASHBOARD) { launchSingleTop = true } },
+                        onClick = { selectedTab = 0; navigateToTab(ROUTE_DASHBOARD) },
                         icon = { Icon(Icons.Filled.Home, null) },
                         label = { Text(stringResource(R.string.tab_plugs)) },
                     )
                     ShortNavigationBarItem(
                         selected = selectedTab == 1,
-                        onClick = { selectedTab = 1; navController.navigate(ROUTE_POWER) { launchSingleTop = true } },
+                        onClick = { selectedTab = 1; navigateToTab(ROUTE_POWER) },
                         icon = { Icon(Icons.Filled.Info, null) },
                         label = { Text(stringResource(R.string.tab_power)) },
                     )
                     ShortNavigationBarItem(
                         selected = selectedTab == 2,
-                        onClick = { selectedTab = 2; navController.navigate(ROUTE_AUTOMATIONS) { launchSingleTop = true } },
+                        onClick = { selectedTab = 2; navigateToTab(ROUTE_AUTOMATIONS) },
                         icon = { Icon(Icons.Filled.Info, null) },
                         label = { Text(stringResource(R.string.tab_automations)) },
                     )
                     ShortNavigationBarItem(
                         selected = selectedTab == 3,
-                        onClick = { selectedTab = 3; navController.navigate(ROUTE_ACTIVITY) { launchSingleTop = true } },
+                        onClick = { selectedTab = 3; navigateToTab(ROUTE_ACTIVITY) },
                         icon = { Icon(Icons.Filled.Warning, null) },
                         label = { Text(stringResource(R.string.tab_activity)) },
                     )
                     ShortNavigationBarItem(
                         selected = selectedTab == 4,
-                        onClick = { selectedTab = 4; navController.navigate(ROUTE_NOTIFICATIONS) { launchSingleTop = true } },
+                        onClick = { selectedTab = 4; navigateToTab(ROUTE_NOTIFICATIONS) },
                         icon = {
                             BadgedBox(badge = { if (unreadCount > 0) Badge { Text("$unreadCount") } }) {
                                 Icon(Icons.Default.Warning, null)
@@ -152,7 +168,7 @@ fun PowerkNavigation() {
                     )
                     ShortNavigationBarItem(
                         selected = selectedTab == 5,
-                        onClick = { selectedTab = 5; navController.navigate(ROUTE_SETTINGS) { launchSingleTop = true } },
+                        onClick = { selectedTab = 5; navigateToTab(ROUTE_SETTINGS) },
                         icon = { Icon(Icons.Filled.Settings, null) },
                         label = { Text(stringResource(R.string.tab_settings)) },
                     )
@@ -176,7 +192,7 @@ fun PowerkNavigation() {
                         loading = loading,
                         pending = pending,
                         onRefresh = { scope.launch { refresh() } },
-                        onOpenSettings = { selectedTab = 5; navController.navigate(ROUTE_SETTINGS) { launchSingleTop = true } },
+                        onOpenSettings = { selectedTab = 5; navigateToTab(ROUTE_SETTINGS) },
                         onCommand = { mac, outlet, on -> command(mac, outlet, on) },
                         onIconChange = { mac, outlet, icon -> updateIcon(mac, outlet, icon) },
                         onStripTap = { mac -> navController.navigate("strip/$mac") },
