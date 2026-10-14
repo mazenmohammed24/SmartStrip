@@ -175,61 +175,66 @@ class ProvisionViewModel(application: Application) : AndroidViewModel(applicatio
         provisionOk = false
         provisionStatus = ctx.getString(R.string.provision_connecting_strip, strip.ssid)
 
-        viewModelScope.launch {
-            val network = WifiHelper.connectToStripAp(
-                context = ctx,
-                ssid = strip.ssid,
-                onLost = { fastRoamBack ->
-                    // Only react while still in the "connecting" sub-phase
-                    // (provisionStep == 1, before sendWifiAndWait has moved
-                    // us to step 2). Once sending has started, ignore onLost
-                    // entirely and let the send's own try/catch decide
-                    // success/failure — resetting here too would race with it.
-                    if (provisionStep == 1) {
-                        if (fastRoamBack) {
-                            // The OS instantly roamed back to a known network
-                            // (e.g. Huawei Wi-Fi+). Retrying immediately would
-                            // just pop another system dialog in a loop — surface
-                            // guidance and let the user retry manually instead.
-                            // Unregister the callback now: leaving it registered
-                            // keeps the system "connect to network" dialog
-                            // reappearing to try to re-satisfy the dead request.
+        // Shared between the "already connected" fast path and the normal connect-request path
+        // below, so both react to a dropped connection the same way.
+        val onLost: (Boolean) -> Unit = { fastRoamBack ->
+            // Only react while still in the "connecting" sub-phase (provisionStep == 1, before
+            // sendWifiAndWait has moved us to step 2). Once sending has started, ignore onLost
+            // entirely and let the send's own try/catch decide success/failure — resetting here
+            // too would race with it.
+            if (provisionStep == 1) {
+                if (fastRoamBack) {
+                    // The OS instantly roamed back to a known network (e.g. Huawei Wi-Fi+).
+                    // Retrying immediately would just pop another system dialog in a loop —
+                    // surface guidance and let the user retry manually instead. Unregister the
+                    // callback now: leaving it registered keeps the system "connect to network"
+                    // dialog reappearing to try to re-satisfy the dead request.
+                    stopKeepAlive()
+                    WifiHelper.releaseStripNetwork(ctx)
+                    reconnecting = false
+                    connectAttempted = false
+                    boundStripNetwork = null
+                    provisionOk = false
+                    provisionStatus = WifiHelper.fastRoamBackMessage()
+                } else {
+                    reconnecting = true
+                    viewModelScope.launch {
+                        val recon = WifiHelper.connectToStripAp(
+                            context = ctx,
+                            ssid = strip.ssid,
+                        )
+                        reconnecting = false
+                        if (recon == null) {
                             stopKeepAlive()
                             WifiHelper.releaseStripNetwork(ctx)
-                            reconnecting = false
                             connectAttempted = false
                             boundStripNetwork = null
                             provisionOk = false
-                            provisionStatus = WifiHelper.fastRoamBackMessage()
+                            provisionStatus = "Reconnection to strip AP failed. Move closer and try again."
                         } else {
-                            reconnecting = true
-                            viewModelScope.launch {
-                                val recon = WifiHelper.connectToStripAp(
-                                    context = ctx,
-                                    ssid = strip.ssid,
-                                )
-                                reconnecting = false
-                                if (recon == null) {
-                                    stopKeepAlive()
-                                    WifiHelper.releaseStripNetwork(ctx)
-                                    connectAttempted = false
-                                    boundStripNetwork = null
-                                    provisionOk = false
-                                    provisionStatus = "Reconnection to strip AP failed. Move closer and try again."
-                                } else {
-                                    // Reconnected — send immediately, same as
-                                    // the initial success path, to stay inside
-                                    // the brief connectivity window.
-                                    boundStripNetwork = recon
-                                    provisionOk = true
-                                    startKeepAlive()
-                                    sendWifiAndWait()
-                                }
-                            }
+                            // Reconnected — send immediately, same as
+                            // the initial success path, to stay inside
+                            // the brief connectivity window.
+                            boundStripNetwork = recon
+                            provisionOk = true
+                            startKeepAlive()
+                            sendWifiAndWait()
                         }
                     }
-                },
-            )
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            // If the phone is already connected to the strip AP — e.g. connected manually via
+            // system Wi-Fi settings, or left over from a previous attempt — reuse that network
+            // instead of issuing a brand-new connect request. A fresh WifiNetworkSpecifier
+            // request always pops the system "connect to this network?" dialog even when
+            // already associated, and accepting it tears down and re-establishes the link —
+            // which is exactly what made Connect/Retry look like it "asks to connect, then
+            // disconnects right away" when the phone was already on the strip's hotspot.
+            val network = WifiHelper.reuseIfAlreadyConnected(ctx, strip.ssid, onLost)
+                ?: WifiHelper.connectToStripAp(context = ctx, ssid = strip.ssid, onLost = onLost)
             connectingAp = false
             if (network == null) {
                 provisionStatus = ctx.getString(R.string.provision_connect_strip_failed)

@@ -217,6 +217,58 @@ object WifiHelper {
         }
     }
 
+    /**
+     * If the phone is already connected to [ssid] — e.g. the user connected manually via
+     * system Wi-Fi settings before tapping Connect/Retry, or a previous attempt left the
+     * connection in place — reuses that network directly instead of going through
+     * [connectToStripAp]'s [WifiNetworkSpecifier] request.
+     *
+     * That request always pops the system "connect to this network?" dialog, even when the
+     * phone is already associated with [ssid]; accepting it then tears down and immediately
+     * re-establishes the link, which is exactly what made Connect/Retry look like it "asks to
+     * connect, then disconnects right away" when the phone was, in fact, already on the strip's
+     * hotspot. Registers a passive [ConnectivityManager.NetworkCallback] (no specifier, so no
+     * dialog) for the existing network so [keepAlive]/[onLost] keep working the same way as the
+     * [connectToStripAp] path. Returns null if not currently connected to [ssid].
+     */
+    fun reuseIfAlreadyConnected(
+        context: Context,
+        ssid: String,
+        onLost: ((fastRoamBack: Boolean) -> Unit)? = null,
+    ): Network? {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val net = cm.activeNetwork ?: return null
+        val caps = cm.getNetworkCapabilities(net) ?: return null
+        if (!caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return null
+        val currentSsid = (caps.transportInfo as? android.net.wifi.WifiInfo)?.ssid
+            .orEmpty().removeSurrounding("\"")
+        if (currentSsid.isBlank() || currentSsid != ssid) return null
+
+        // Clear any stale registration before taking over bookkeeping for this network.
+        releaseStripNetwork(context)
+
+        val availableAt = System.currentTimeMillis()
+        val request = NetworkRequest.Builder()
+            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+            .build()
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            override fun onLost(network: Network) {
+                if (network != net) return
+                val elapsed = System.currentTimeMillis() - availableAt
+                val fastRoamBack = elapsed < FAST_ROAM_BACK_MS
+                Log.w("WifiHelper", "onLost (reused): $network autoReconnect=$autoReconnectEnabled elapsed=${elapsed}ms fastRoamBack=$fastRoamBack")
+                if (autoReconnectEnabled) onLost?.invoke(fastRoamBack)
+            }
+        }
+        activeConnection.set(StripConnection(net, cb, cm))
+        cm.bindProcessToNetwork(net)
+        runCatching { cm.reportNetworkConnectivity(net, true) }
+        autoReconnectEnabled = true
+        runCatching { cm.registerNetworkCallback(request, cb) }
+        Log.i("WifiHelper", "Reusing already-connected network for ssid=$ssid: $net")
+        return net
+    }
+
     fun bindProcessToNetwork(context: Context, network: Network?) {
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         cm.bindProcessToNetwork(network)
