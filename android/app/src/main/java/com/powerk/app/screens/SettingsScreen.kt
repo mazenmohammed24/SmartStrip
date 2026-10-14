@@ -143,9 +143,23 @@ fun SettingsScreen() {
                 context.checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)
         )
     }
+    var hasNearbyWifiPermission by remember {
+        mutableStateOf(
+            android.os.Build.VERSION.SDK_INT < 33 ||
+                android.content.pm.PackageManager.PERMISSION_GRANTED ==
+                    context.checkSelfPermission(android.Manifest.permission.NEARBY_WIFI_DEVICES)
+        )
+    }
 
-    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        hasLocationPermission = granted
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
+        granted[android.Manifest.permission.ACCESS_FINE_LOCATION]?.let { hasLocationPermission = it }
+        granted[android.Manifest.permission.NEARBY_WIFI_DEVICES]?.let { hasNearbyWifiPermission = it }
+    }
+
+    fun requestWifiPermissions() {
+        val perms = mutableListOf(android.Manifest.permission.ACCESS_FINE_LOCATION)
+        if (android.os.Build.VERSION.SDK_INT >= 33) perms += android.Manifest.permission.NEARBY_WIFI_DEVICES
+        permissionLauncher.launch(perms.toTypedArray())
     }
 
     LaunchedEffect(hasLocationPermission) {
@@ -157,9 +171,20 @@ fun SettingsScreen() {
         }
     }
 
+    // Keep the strip AP connection alive while the wizard needs it (steps 1-3): periodically
+    // re-affirm connectivity/binding so Android/OEM power management doesn't silently drop it.
+    LaunchedEffect(boundStripNetwork, provisionStep) {
+        if (boundStripNetwork != null && provisionStep in 1..2) {
+            while (true) {
+                kotlinx.coroutines.delay(4_000L)
+                if (!WifiHelper.keepAlive()) break
+            }
+        }
+    }
+
     fun doScan() {
-        if (!hasLocationPermission) {
-            permissionLauncher.launch(android.Manifest.permission.ACCESS_FINE_LOCATION)
+        if (!hasLocationPermission || !hasNearbyWifiPermission) {
+            requestWifiPermissions()
             return
         }
         scope.launch {
@@ -327,12 +352,12 @@ fun SettingsScreen() {
                         Text(stringResource(R.string.provision_start))
                     }
                 } else {
-                    if (!hasLocationPermission) {
+                    if (!hasLocationPermission || !hasNearbyWifiPermission) {
                         Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
                             Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Filled.Info, null, Modifier.size(18.dp))
                                 Text(stringResource(R.string.provision_need_location), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                                FilledTonalButton(onClick = { permissionLauncher.launch(android.Manifest.permission.ACCESS_FINE_LOCATION) }) { Text(stringResource(R.string.grant_permission)) }
+                                FilledTonalButton(onClick = { requestWifiPermissions() }) { Text(stringResource(R.string.grant_permission)) }
                             }
                         }
                     }
@@ -437,17 +462,39 @@ fun SettingsScreen() {
                                     val network = WifiHelper.connectToStripAp(
                                         context = context,
                                         ssid = strip.ssid,
-                                        onLost = {
+                                        onLost = { fastRoamBack ->
                                             if (provisionStep in 1..2) {
-                                                reconnecting = true
-                                                scope.launch {
-                                                    val recon = WifiHelper.connectToStripAp(
-                                                        context = context,
-                                                        ssid = strip.ssid,
-                                                    )
+                                                if (fastRoamBack) {
+                                                    // The OS instantly roamed back to a known network
+                                                    // (e.g. Huawei Wi-Fi+). Retrying immediately would
+                                                    // just pop another system dialog in a loop — surface
+                                                    // guidance and let the user retry manually instead.
+                                                    // Unregister the callback now: leaving it registered
+                                                    // keeps the system "connect to network" dialog
+                                                    // reappearing to try to re-satisfy the dead request.
+                                                    WifiHelper.releaseStripNetwork(context)
                                                     reconnecting = false
-                                                    if (recon == null) {
-                                                        provisionStatus = "Reconnection to strip AP failed. Move closer and try again."
+                                                    connectAttempted = false
+                                                    boundStripNetwork = null
+                                                    provisionOk = false
+                                                    provisionStep = 0
+                                                    provisionStatus = WifiHelper.fastRoamBackMessage()
+                                                } else {
+                                                    reconnecting = true
+                                                    scope.launch {
+                                                        val recon = WifiHelper.connectToStripAp(
+                                                            context = context,
+                                                            ssid = strip.ssid,
+                                                        )
+                                                        reconnecting = false
+                                                        if (recon == null) {
+                                                            WifiHelper.releaseStripNetwork(context)
+                                                            connectAttempted = false
+                                                            boundStripNetwork = null
+                                                            provisionOk = false
+                                                            provisionStep = 0
+                                                            provisionStatus = "Reconnection to strip AP failed. Move closer and try again."
+                                                        }
                                                     }
                                                 }
                                             }

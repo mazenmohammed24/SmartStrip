@@ -10,7 +10,6 @@ import android.net.wifi.WifiNetworkSpecifier
 import android.os.Build
 import android.util.Log
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 import java.util.concurrent.atomic.AtomicReference
 
@@ -79,12 +78,43 @@ object WifiHelper {
     /** Scans for nearby strip APs: TONLY_TAP_* (stock) and MTTL-W01-SETUP (standalone). */
     suspend fun scanForStripNetworks(context: Context, attempts: Int = 4): List<WifiScanResult> {
         val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        val appContext = context.applicationContext
+
         repeat(attempts.coerceAtLeast(1)) { attempt ->
             val found = readStripScanResults(wm)
             if (found.isNotEmpty()) return found
+
+            // Android 9+ throttles foreground scans to 4 per 2 minutes; startScan() returning
+            // false means the request was dropped, so don't just blindly delay — wait for the
+            // SCAN_RESULTS_AVAILABLE_ACTION broadcast (fired for scans triggered by anyone,
+            // including the system itself) instead of polling on a fixed timer.
+            val deferred = CompletableDeferred<Unit>()
+            val receiver = object : android.content.BroadcastReceiver() {
+                override fun onReceive(ctx: Context?, intent: android.content.Intent?) {
+                    if (intent?.action == WifiManager.SCAN_RESULTS_AVAILABLE_ACTION) {
+                        deferred.complete(Unit)
+                    }
+                }
+            }
+            runCatching {
+                androidx.core.content.ContextCompat.registerReceiver(
+                    appContext,
+                    receiver,
+                    android.content.IntentFilter(WifiManager.SCAN_RESULTS_AVAILABLE_ACTION),
+                    androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED,
+                )
+            }
+
             @Suppress("DEPRECATION")
-            runCatching { wm.startScan() }
-            delay(if (attempt == 0) 900L else 1_800L)
+            val started = runCatching { wm.startScan() }.getOrDefault(false)
+            try {
+                withTimeout(if (started) 4_000L else 2_000L) { deferred.await() }
+            } catch (_: Exception) {
+                // Timed out waiting for the broadcast (throttled / no new scan) — fall through
+                // and re-check cached scanResults anyway before the next attempt.
+            } finally {
+                runCatching { appContext.unregisterReceiver(receiver) }
+            }
         }
         return readStripScanResults(wm)
     }
@@ -110,14 +140,22 @@ object WifiHelper {
      * or null on failure.  The [NetworkCallback] is kept registered for the entire wizard
      * lifetime so Android does not drop the connection.  Call [releaseStripNetwork] when done.
      *
-     * [onLost] is invoked on the callback thread whenever Android tears down the link so the
-     * caller can trigger a reconnect attempt.
+     * [onLost] is invoked on the callback thread whenever Android tears down the link, with
+     * [fastRoamBack]=true if the loss happened within [FAST_ROAM_BACK_MS] of [onAvailable]. That
+     * fast pattern is not the normal "no internet, deprioritize after idle" teardown (which takes
+     * many seconds) — it is the OS (observed on Huawei EMUI "Wi-Fi+"/smart dual-network switch,
+     * and reported for Samsung/MIUI too) immediately roaming back to a known internet-providing
+     * network. Blindly auto-reconnecting in that case just re-triggers another system connect
+     * dialog a moment later (the "infinite loop asking me to connect" failure mode), so callers
+     * should surface actionable guidance instead of silently retrying when fastRoamBack is true.
      */
+    private const val FAST_ROAM_BACK_MS = 2_000L
+
     suspend fun connectToStripAp(
         context: Context,
         ssid: String,
         onConnecting: () -> Unit = {},
-        onLost: (() -> Unit)? = null,
+        onLost: ((fastRoamBack: Boolean) -> Unit)? = null,
     ): Network? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
 
@@ -133,16 +171,23 @@ object WifiHelper {
         }
         val request = NetworkRequest.Builder()
             .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+            // The strip AP has no internet; tell Android not to deprioritize/reject it for that.
+            .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED)
             .setNetworkSpecifier(specifier)
             .build()
 
         val deferred = CompletableDeferred<Network?>()
+        var availableAt = 0L
 
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
                 Log.i("WifiHelper", "onAvailable: $network")
+                availableAt = System.currentTimeMillis()
                 activeConnection.set(StripConnection(network, this, cm))
                 cm.bindProcessToNetwork(network)
+                // Tell the OS this no-internet network is working fine so it isn't torn down.
+                runCatching { cm.reportNetworkConnectivity(network, true) }
                 // Only arm auto-reconnect after a real connection is established.
                 autoReconnectEnabled = true
                 deferred.complete(network)
@@ -153,9 +198,11 @@ object WifiHelper {
                 deferred.complete(null)
             }
             override fun onLost(network: Network) {
-                Log.w("WifiHelper", "onLost: $network autoReconnect=$autoReconnectEnabled")
+                val elapsed = System.currentTimeMillis() - availableAt
+                val fastRoamBack = availableAt != 0L && elapsed < FAST_ROAM_BACK_MS
+                Log.w("WifiHelper", "onLost: $network autoReconnect=$autoReconnectEnabled elapsed=${elapsed}ms fastRoamBack=$fastRoamBack")
                 // Only notify if we had a real connection first.
-                if (autoReconnectEnabled) onLost?.invoke()
+                if (autoReconnectEnabled) onLost?.invoke(fastRoamBack)
             }
         }
 
@@ -175,11 +222,44 @@ object WifiHelper {
         cm.bindProcessToNetwork(network)
     }
 
+    /**
+     * Keeps the strip AP connection alive. Android (and especially OEM skins such as
+     * Huawei EMUI, Samsung One UI, MIUI) treats a validated-as-"no internet" Wi-Fi network as
+     * low priority and silently tears it down after a short grace period, particularly once the
+     * screen is off or another network briefly appears. Calling this periodically (every few
+     * seconds) while the wizard holds the strip AP tells the OS the network is working fine and
+     * re-affirms the process binding in case the OS cleared it. Call from a loop (e.g. every
+     * 4s) for as long as the wizard needs the connection; stop when [releaseStripNetwork] is
+     * called. Returns false if there is no active strip connection (loop should stop).
+     */
+    fun keepAlive(): Boolean {
+        val conn = activeConnection.get() ?: return false
+        runCatching { conn.cm.reportNetworkConnectivity(conn.network, true) }
+        runCatching { conn.cm.bindProcessToNetwork(conn.network) }
+        return true
+    }
+
     /** Unregisters the active callback and unbinds the process from the strip network. */
     fun releaseStripNetwork(context: Context) {
         autoReconnectEnabled = false
         val conn = activeConnection.getAndSet(null) ?: return
         runCatching { conn.cm.unregisterNetworkCallback(conn.callback) }
         runCatching { conn.cm.bindProcessToNetwork(null) }
+    }
+
+    /** True on Huawei/Honor (EMUI/HarmonyOS), which ships an aggressive "Wi-Fi+" auto roam-back
+     * feature that is the most common cause of [FAST_ROAM_BACK_MS]-class disconnects. */
+    fun isHuaweiLikeDevice(): Boolean {
+        val manufacturer = Build.MANUFACTURER.orEmpty().lowercase()
+        return manufacturer.contains("huawei") || manufacturer.contains("honor")
+    }
+
+    /** User-facing guidance for a fast roam-back disconnect (see [FAST_ROAM_BACK_MS]). */
+    fun fastRoamBackMessage(): String = if (isHuaweiLikeDevice()) {
+        "Your phone instantly reconnected to your known Wi-Fi (Huawei \"Wi-Fi+\" auto-switch). " +
+            "Turn it off: Settings → Wi-Fi → More settings → Wi-Fi+ (or Smart Network Switch), then tap Connect again."
+    } else {
+        "Your phone instantly reconnected to a known Wi-Fi network instead of staying on the strip's hotspot. " +
+            "Turn off Wi-Fi auto-switching / \"Smart network switch\" for your other networks, then tap Connect again."
     }
 }
