@@ -4,7 +4,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import android.util.Log
 import java.net.HttpURLConnection
+import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.URL
 
@@ -39,6 +41,7 @@ data class Strip(
 data class Snapshot(val serverIp: String, val strips: List<Strip>)
 data class DiscoveredStrip(val driverStripId: String, val model: String, val suggestedName: String, val ipAddress: String?, val relayCount: Int)
 data class ProvisionResult(val registered: Boolean, val stripName: String?, val message: String)
+data class ServerAddress(val host: String, val ip: String)
 data class PowerSummary(val todayKwh: Double, val todayCost: Double, val currency: String, val liveWatts: Double)
 data class PowerPoint(val bucketStart: String, val avgW: Double, val minW: Double, val maxW: Double, val kwh: Double)
 data class PowerHistory(val range: String, val points: List<PowerPoint>)
@@ -335,14 +338,56 @@ object Api {
 
 
 
-    suspend fun configureStripWifi(serverAddress: String, ssid: String, password: String): String = withContext(Dispatchers.IO) {
-        val serverIp = serverAddressForStrip(serverAddress)
-        validateProvisionInput(serverIp, ssid, password)
-        val ipReply = setupCommand("up:ip:$serverIp", "up:ip", false)
-        if (!ipReply.contains("up:ip:ip_ok")) throw ServerException("The strip rejected the server IP: ${ipReply.ifBlank { "no reply" }}")
+    /**
+     * Sends Wi-Fi credentials to the strip.
+     *
+     * Standalone firmware (MTTL-W01-SETUP AP): HTTP POST to http://192.168.4.1/wifi
+     * Stock firmware (TONLY_TAP_* AP): TCP setup commands to 192.168.1.1:30300
+     */
+    suspend fun configureStripWifi(
+        ssid: String,
+        password: String,
+        standalone: Boolean,
+    ): String = withContext(Dispatchers.IO) {
+        if (standalone) {
+            configureStandaloneWifi(ssid, password)
+        } else {
+            configureStockWifi(ssid, password)
+        }
+    }
+
+    private fun configureStandaloneWifi(ssid: String, password: String): String {
+        val url = URL("http://192.168.4.1/wifi")
+        val body = "ssid=${java.net.URLEncoder.encode(ssid, "UTF-8")}&password=${java.net.URLEncoder.encode(password, "UTF-8")}"
+        val conn = url.openConnection() as HttpURLConnection
+        try {
+            conn.connectTimeout = 6_000
+            conn.readTimeout = 10_000
+            conn.requestMethod = "POST"
+            conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+            conn.doOutput = true
+            conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            val code = conn.responseCode
+            val response = (if (code in 200..299) conn.inputStream else conn.errorStream)
+                ?.bufferedReader()?.use { it.readText() }.orEmpty()
+            Log.i("SmartStripProvision", "standalone wifi POST code=$code response=$response")
+            if (code !in 200..299) throw ServerException("Strip setup page returned HTTP $code")
+            return "Wi-Fi credentials sent to strip. Waiting for it to join your network…"
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    private fun configureStockWifi(ssid: String, password: String): String {
+        Log.i("SmartStripProvision", "configureStockWifi ssid=$ssid")
+        validateProvisionInput(ssid, password)
+        val ipReply = setupCommand("up:ip:", "up:ip", false)
+        Log.i("SmartStripProvision", "ipReply=$ipReply")
         val connectReply = setupCommand("up:connect:$ssid:$password", "up:connect", true)
+        Log.i("SmartStripProvision", "connectReply=$connectReply")
+        setupCommand("up:reboot:0", "up:reboot", false)
         if (!connectReply.contains("up:connect:connect_ok")) throw ServerException("The strip rejected the Wi-Fi settings")
-        "Strip accepted Wi-Fi and server $serverIp. Waiting for it to reconnect?"
+        return "Strip accepted Wi-Fi settings. Waiting for it to reconnect…"
     }
 
     suspend fun waitForRegistration(base: String, token: String): ProvisionResult = withContext(Dispatchers.IO) {
@@ -366,8 +411,48 @@ object Api {
         ProvisionResult(true, strip.suggestedName, "${strip.suggestedName} is provisioned and registered on your SmartStrip server.")
     }
 
+    /**
+     * Waits for a standalone-firmware strip to appear on the LAN.
+     * Scans the strip's expected LAN address (192.168.x.x) by probing /api/status.
+     * Returns the strip IP on success, or null after timeout.
+     */
+    suspend fun waitForStandaloneStrip(timeoutMs: Long = 60_000L): String? = withContext(Dispatchers.IO) {
+        val start = System.currentTimeMillis()
+        while (System.currentTimeMillis() - start < timeoutMs) {
+            val ip = probeStandaloneStrip()
+            if (ip != null) return@withContext ip
+            delay(3_000L)
+        }
+        null
+    }
+
+    private fun probeStandaloneStrip(): String? {
+        // Try common 192.168.x.x ranges - the strip typically picks a DHCP address
+        // We probe the gateway's neighbor range; for now we do a quick HEAD on /api/status
+        // across a /24 subnet derived from local interface
+        val ranges = listOf("192.168.1", "192.168.0")
+        for (prefix in ranges) {
+            for (i in 1..254) {
+                val ip = "$prefix.$i"
+                try {
+                    val conn = URL("http://$ip/api/status").openConnection() as HttpURLConnection
+                    conn.connectTimeout = 300
+                    conn.readTimeout = 300
+                    conn.requestMethod = "GET"
+                    val code = conn.responseCode
+                    conn.disconnect()
+                    if (code == 200) {
+                        Log.i("SmartStripProvision", "Found standalone strip at $ip")
+                        return ip
+                    }
+                } catch (_: Exception) { /* not reachable */ }
+            }
+        }
+        return null
+    }
+
     suspend fun provisionAndRegister(base: String, token: String, serverIp: String, ssid: String, password: String): ProvisionResult = withContext(Dispatchers.IO) {
-        configureStripWifi(serverIp, ssid, password)
+        configureStripWifi(ssid, password, false)
         waitForRegistration(base, token)
     }
 
@@ -560,32 +645,73 @@ object Api {
 
     private fun setupCommand(command: String, label: String, sensitive: Boolean): String {
         try {
-            Socket(MTTL_SETUP_HOST, MTTL_SETUP_PORT).use { socket ->
-                socket.soTimeout = 8000
-                socket.getOutputStream().write("$command\r\n".toByteArray(Charsets.UTF_8))
+            Socket().use { socket ->
+                socket.connect(InetSocketAddress(MTTL_SETUP_HOST, MTTL_SETUP_PORT), 8_000)
+                socket.soTimeout = 12_000
+                val out = socket.getOutputStream()
+                val input = socket.getInputStream()
+                out.write("$command\r\n".toByteArray(Charsets.UTF_8))
+                out.flush()
+                socket.shutdownOutput()
                 val bytes = ByteArray(1024)
-                val count = socket.getInputStream().read(bytes)
+                val count = input.read(bytes)
                 return if (count > 0) String(bytes, 0, count, Charsets.UTF_8).trim() else ""
             }
         } catch (e: Exception) {
+            Log.e("SmartStripProvision", "setupCommand failed label=$label command=${if (sensitive) "***" else command}", e)
             val target = "$MTTL_SETUP_HOST:$MTTL_SETUP_PORT"
             val hint = "Join this phone to the strip setup Wi-Fi (TONLY_TAP_*, password LGU_*) and try again."
-            throw ServerException("Could not send $label to $target. $hint")
+            throw ServerException("Could not send $label to $target. ${e.message ?: ""} $hint")
         }
     }
 
-    private fun serverAddressForStrip(value: String): String {
+    fun resolveServerAddressForStrip(value: String): ServerAddress {
+        val host = serverAddressHost(value)
+        val ip = runCatching { java.net.InetAddress.getByName(host).hostAddress }
+            .getOrNull()
+            ?.takeIf { isIpv4(it) }
+            ?: host
+        return ServerAddress(host, ip)
+    }
+
+    fun provisionAddressFromServer(base: String, token: String): ServerAddress {
+        val host = serverAddressHost(base)
+        val fallback = resolveServerAddressForStrip(base)
+        return runCatching {
+            val root = JSONObject(request("$base/api/mttl/status", null, token))
+            val advertised = root.optString("advertisedIp").takeIf { isIpv4(it) }
+            val localIps = root.optJSONArray("localIps")
+            val locals = (0 until (localIps?.length() ?: 0))
+                .map { localIps!!.optString(it) }
+                .filter { isPrivateIpv4(it) }
+            val local = locals.firstOrNull { it.startsWith("192.168.") }
+                ?: locals.firstOrNull { it.startsWith("10.") }
+                ?: locals.firstOrNull { it.startsWith("172.") }
+            ServerAddress(host, advertised ?: local ?: fallback.ip)
+        }.getOrDefault(fallback)
+    }
+
+    private fun serverAddressHost(value: String): String {
         val trimmed = value.trim()
         return runCatching {
             if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) URL(trimmed).host else trimmed
         }.getOrDefault(trimmed).substringBefore('/').substringBefore(':')
     }
 
-    private fun validateProvisionInput(serverIp: String, ssid: String, password: String) {
-        val parts = serverIp.split('.')
-        if (parts.size != 4 || parts.any { it.toIntOrNull()?.let { n -> n !in 0..255 } ?: true }) {
-            throw ServerException("Server IP must be an IPv4 address reachable by the strip")
-        }
+    private fun isIpv4(value: String): Boolean {
+        val parts = value.split('.')
+        return parts.size == 4 && parts.all { it.toIntOrNull()?.let { n -> n in 0..255 } == true }
+    }
+
+    private fun isPrivateIpv4(value: String): Boolean {
+        if (!isIpv4(value)) return false
+        val p = value.split('.').map { it.toInt() }
+        return p[0] == 10 ||
+            (p[0] == 172 && p[1] in 16..31) ||
+            (p[0] == 192 && p[1] == 168)
+    }
+
+    private fun validateProvisionInput(ssid: String, password: String) {
         if (ssid.isBlank() || password.isBlank()) throw ServerException("Wi-Fi name and password are required")
         if (ssid.any { it == ':' || it == '\n' || it == '\r' } || password.any { it == ':' || it == '\n' || it == '\r' }) {
             throw ServerException("Wi-Fi name/password cannot contain ':' or newlines")

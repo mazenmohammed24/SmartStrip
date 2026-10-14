@@ -129,6 +129,7 @@ fun SettingsScreen() {
     var stripNetworks by remember { mutableStateOf<List<WifiScanResult>>(emptyList()) }
     var scanning by remember { mutableStateOf(false) }
     var foundStripIp by remember { mutableStateOf<String?>(null) }
+    var reconnecting by remember { mutableStateOf(false) }
 
     val isStandalone = selectedStrip?.type == StripApType.STANDALONE
 
@@ -178,8 +179,10 @@ fun SettingsScreen() {
     fun commit() = Server.save(serverUrl, token)
 
     fun resetWizard() {
+        WifiHelper.autoReconnectEnabled = false
         WifiHelper.releaseStripNetwork(context)
         boundStripNetwork = null
+        reconnecting = false
         provisionStep = 0
         provisionStatus = null
         provisionOk = false
@@ -351,13 +354,28 @@ fun SettingsScreen() {
                             Spacer(Modifier.width(8.dp))
                             Text(stringResource(R.string.provision_step_1_action))
                         }
-                        if (scanning || connectingAp) CircularWavyProgressIndicator(Modifier.fillMaxWidth())
+                        if (scanning || connectingAp || reconnecting) CircularWavyProgressIndicator(Modifier.fillMaxWidth())
+                        if (reconnecting) {
+                            Surface(
+                                shape = MaterialTheme.shapes.small,
+                                color = MaterialTheme.colorScheme.tertiaryContainer,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(
+                                    "Lost AP connection — reconnecting…",
+                                    Modifier.padding(10.dp),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                )
+                            }
+                        }
                         Text(
                             stringResource(R.string.provision_step_1_found, stripNetworks.size),
                             style = MaterialTheme.typography.bodySmall,
                         )
                         stripNetworks.forEach { network ->
-                            val typeTag = if (network.type == StripApType.STANDALONE) "standalone" else "stock"
+                            val isStandaloneNet = network.type == StripApType.STANDALONE
+                            val typeTag = if (isStandaloneNet) "standalone" else "stock"
                             val selected = selectedStrip?.ssid == network.ssid
                             OutlinedButton(
                                 onClick = { selectedStrip = network },
@@ -377,25 +395,63 @@ fun SettingsScreen() {
                                 )
                             }
                         }
+                        // Firmware type info banner for the selected strip
+                        selectedStrip?.let { strip ->
+                            val bannerColor = if (strip.type == StripApType.STANDALONE)
+                                MaterialTheme.colorScheme.primaryContainer
+                            else
+                                MaterialTheme.colorScheme.secondaryContainer
+                            val bannerText = if (strip.type == StripApType.STANDALONE)
+                                "✅  Standalone firmware detected — full local control available."
+                            else
+                                "⚠️  Stock firmware detected — the strip will be provisioned to your home Wi-Fi and registered on this server."
+                            Surface(
+                                shape = MaterialTheme.shapes.medium,
+                                color = bannerColor,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Filled.Info, null, Modifier.size(16.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(bannerText, style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
                         Button(
                             onClick = {
                                 val strip = selectedStrip ?: return@Button
                                 connectingAp = true
+                                reconnecting = false
                                 provisionStatus = context.getString(R.string.provision_connecting_strip, strip.ssid)
-                                scope.launch {
-                                    val network = WifiHelper.connectToStripAp(context, strip.ssid)
-                                    if (network == null) {
-                                        provisionStatus = context.getString(R.string.provision_connect_strip_failed)
-                                        provisionOk = false
-                                    } else {
-                                        boundStripNetwork = network
-                                        WifiHelper.bindProcessToNetwork(context, network)
-                                        provisionStatus = null
-                                        provisionOk = true
-                                        provisionStep = 1
+                                WifiHelper.autoReconnectEnabled = true
+
+                                fun doConnect() {
+                                    scope.launch {
+                                        val network = WifiHelper.connectToStripAp(
+                                            context = context,
+                                            ssid = strip.ssid,
+                                            onLost = {
+                                                // Called on the callback thread when Android drops the link
+                                                if (WifiHelper.autoReconnectEnabled && provisionStep <= 2) {
+                                                    reconnecting = true
+                                                    doConnect()
+                                                }
+                                            },
+                                        )
+                                        reconnecting = false
+                                        if (network == null) {
+                                            provisionStatus = context.getString(R.string.provision_connect_strip_failed)
+                                            provisionOk = false
+                                        } else {
+                                            boundStripNetwork = network
+                                            provisionStatus = null
+                                            provisionOk = true
+                                            provisionStep = 1
+                                        }
+                                        connectingAp = false
                                     }
-                                    connectingAp = false
                                 }
+                                doConnect()
                             },
                             enabled = selectedStrip != null && !scanning && !provisionBusy && !connectingAp,
                             modifier = Modifier.fillMaxWidth(),

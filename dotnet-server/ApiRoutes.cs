@@ -68,6 +68,7 @@ app.MapPatch("/api/strips/{id}/relays/{index:int}", async (string id, int index,
 });
 
 app.MapGet("/api/mttl/status", () => Results.Ok(new { devicePort = driver.Port, setupHost = Env("MTTL_SETUP_HOST", "192.168.1.1"), setupPort = 30300, advertisedIp = Env("MTTL_ADVERTISE_IP", ""), localIps = LocalIps(), strips = driver.Telemetry() }));
+app.MapGet("/api/mttl/logs", (int? limit) => Results.Ok(new { logPath = MttlLog.Path, lines = MttlLog.Tail(limit ?? 200) }));
 app.MapPost("/api/mttl/provision", async ([FromBody] ProvisionRequest req) => Results.Ok(await ProvisionAsync(req)));
 
 app.MapGet("/api/power/live", () => Results.Ok(new { live = store.LivePower() }));
@@ -140,16 +141,20 @@ app.MapPost("/api/mttl/provision-status/{mac}", (string mac) =>
 
     static async Task<object> ProvisionAsync(ProvisionRequest req)
     {
+        MttlLog.Write($"setup-start serverIp={req.ServerIp} ssid={req.Ssid}");
         using var client = new TcpClient();
         await client.ConnectAsync(Env("MTTL_SETUP_HOST", "192.168.1.1"), 30300);
         await using var stream = client.GetStream();
-        await stream.WriteAsync(Encoding.UTF8.GetBytes($"up:ip:{req.ServerIp}\r\n"));
+        var ipCommand = $"up:ip:{req.ServerIp}\r\n";
+        await stream.WriteAsync(Encoding.UTF8.GetBytes(ipCommand));
+        MttlLog.Write($"setup-send command=up:ip:{req.ServerIp}");
         await Task.Delay(250);
         client.Close();
         using var client2 = new TcpClient();
         await client2.ConnectAsync(Env("MTTL_SETUP_HOST", "192.168.1.1"), 30300);
         await using var stream2 = client2.GetStream();
         await stream2.WriteAsync(Encoding.UTF8.GetBytes($"up:connect:{req.Ssid}:{req.Password}\r\n"));
+        MttlLog.Write($"setup-send command=up:connect:{req.Ssid}:***");
         return new { ok = true, message = $"Strip will join {req.Ssid} and dial {req.ServerIp}:10086." };
     }
 

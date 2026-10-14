@@ -31,6 +31,30 @@ public static class Util
     public static string Id() => Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Replace("+", "-").Replace("/", "_").TrimEnd('=').Substring(0, 12);
 }
 
+public static class MttlLog
+{
+    private static readonly object Gate = new();
+    public static string Path { get; } = System.IO.Path.Combine(AppContext.BaseDirectory, "data", "mttl.log");
+
+    public static void Write(string message)
+    {
+        lock (Gate)
+        {
+            Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
+            File.AppendAllText(Path, $"{DateTimeOffset.UtcNow:O} {message}{Environment.NewLine}");
+        }
+    }
+
+    public static string[] Tail(int count = 200)
+    {
+        lock (Gate)
+        {
+            if (!File.Exists(Path)) return Array.Empty<string>();
+            return File.ReadLines(Path).TakeLast(Math.Clamp(count, 1, 1000)).ToArray();
+        }
+    }
+}
+
 public record AdoptStripRequest(string DriverStripId, string Model, int RelayCount, string? IpAddress, string SuggestedName, string? Name, string? Location);
 public record UpdateStripRequest(string? Name, string? Location, int? Order, string? Icon);
 public record UpdateRelayRequest(string? State, string? Name, string? Icon);
@@ -158,6 +182,7 @@ public class MttlDriver : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         listener = new TcpListener(IPAddress.Any, Port); listener.Start();
+        MttlLog.Write($"tcp-listening port={Port}");
         _ = Task.Run(() => PollLoop(stoppingToken), stoppingToken);
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -187,23 +212,28 @@ public class MttlDriver : BackgroundService
     private async Task HandleClient(TcpClient client, CancellationToken ct)
     {
         var ep = client.Client.RemoteEndPoint?.ToString() ?? "";
+        MttlLog.Write($"tcp-accepted remote={ep}");
         await using var stream = client.GetStream(); using var reader = new StreamReader(stream, Encoding.UTF8); var writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true, NewLine = "\r\n" };
         DeviceSession? session = null;
         while (!ct.IsCancellationRequested && client.Connected)
         {
             var line = await reader.ReadLineAsync(ct); if (line is null) break;
             line = line.Replace("\0", "").Trim(); if (line.Length == 0) continue;
+            MttlLog.Write($"tcp-line remote={ep} line={line}");
             var boot = Protocol.ParseBoot(line);
             if (boot is not null)
             {
                 session = new DeviceSession(boot.Value.Mac, boot.Value.Model, boot.Value.Fw, ep, writer);
                 sessions[session.Mac] = session;
+                MttlLog.Write($"tcp-boot mac={session.Mac} model={session.Model} fw={session.Fw} remote={ep}");
                 await session.SendAsync("up:getinfo:all");
+                MttlLog.Write($"tcp-send mac={session.Mac} command=up:getinfo:all");
                 continue;
             }
             session?.Apply(line);
             if (session is not null) store.ApplyTelemetry(session.Telemetry());
         }
+        MttlLog.Write($"tcp-closed remote={ep} mac={session?.Mac ?? "none"}");
         if (session is not null) sessions.TryRemove(session.Mac, out _);
     }
 }

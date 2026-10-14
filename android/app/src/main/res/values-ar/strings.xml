@@ -49,8 +49,14 @@
     <string name="provision_body">التطبيق هيدور على شبكات TONLY_TAP_*، يتصل بالمشترك تلقائيًا، يبعتله بيانات واي فاي البيت وعنوان السيرفر، وبعدين يستنى يسجله. اللي محتاج تكتبه بس كلمة مرور واي فاي البيت.</string>
     <string name="provision_and_register">إعداد وتسجيل</string>
     <string name="provision_scan">ابحث عن المشترك</string>
-    <string name="provision_scanning">جاري البحث…</string>
+    <string name="provision_scanning">جاري البحث… خلي المشترك شغال وقريب.</string>
     <string name="provision_no_strips">مفيش شبكات TONLY_TAP_*</string>
+    <string name="provision_no_strips_found">مفيش شبكات TONLY_TAP_*. خلي المشترك في وضع الإعداد وجرب البحث تاني.</string>
+    <string name="provision_connecting_strip">جاري الاتصال بـ %1$s… وافق على رسالة Wi-Fi لو ظهرت.</string>
+    <string name="provision_connect_strip_failed">تعذر الاتصال بشبكة المشترك. قرب منه وخليه في وضع الإعداد وجرب تاني.</string>
+    <string name="provision_strip_connected">تم الاتصال بشبكة المشترك. اكتب كلمة مرور واي فاي البيت فقط.</string>
+    <string name="provision_sending">جاري إرسال الإعداد للمشترك…</string>
+    <string name="provision_step_4_body">التطبيق هيكتب واي فاي البيت وعنوان السيرفر على المشترك، وبعدين يستنى ظهوره على السيرفر.</string>
     <string name="provision_strips_found">‏%1$d مشترك — اضغط للاختيار</string>
     <string name="provision_selected_strip">المشترك: %1$s</string>
     <string name="provision_connecting_ap">جاري الاتصال بـ %1$s…</string>
