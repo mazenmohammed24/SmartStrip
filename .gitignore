@@ -46,3 +46,4 @@ obj/
 bin/
 .vs/
 *.user
+logcat_provision*.txt
