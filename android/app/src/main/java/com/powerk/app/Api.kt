@@ -335,19 +335,23 @@ object Api {
 
 
 
-    suspend fun provisionAndRegister(base: String, token: String, serverIp: String, ssid: String, password: String): ProvisionResult = withContext(Dispatchers.IO) {
+    suspend fun configureStripWifi(serverAddress: String, ssid: String, password: String): String = withContext(Dispatchers.IO) {
+        val serverIp = serverAddressForStrip(serverAddress)
         validateProvisionInput(serverIp, ssid, password)
         val ipReply = setupCommand("up:ip:$serverIp", "up:ip", false)
         if (!ipReply.contains("up:ip:ip_ok")) throw ServerException("The strip rejected the server IP: ${ipReply.ifBlank { "no reply" }}")
         val connectReply = setupCommand("up:connect:$ssid:$password", "up:connect", true)
         if (!connectReply.contains("up:connect:connect_ok")) throw ServerException("The strip rejected the Wi-Fi settings")
+        "Strip accepted Wi-Fi and server $serverIp. Waiting for it to reconnect?"
+    }
 
+    suspend fun waitForRegistration(base: String, token: String): ProvisionResult = withContext(Dispatchers.IO) {
         val discovered = waitForDiscoveredStrip(base, token)
         val strip = discovered.firstOrNull()
             ?: return@withContext ProvisionResult(
                 registered = false,
                 stripName = null,
-                message = "Wi-Fi was sent. Reconnect this phone to your normal network, wait for the strip to dial the server, then scan/register from the web UI.",
+                message = "Wi-Fi was sent, but the strip did not appear on the server yet. Keep the server reachable and scan again in a minute.",
             )
 
         val body = JSONObject()
@@ -360,6 +364,49 @@ object Api {
             .toString()
         request("$base/api/strips", body, token)
         ProvisionResult(true, strip.suggestedName, "${strip.suggestedName} is provisioned and registered on your SmartStrip server.")
+    }
+
+    suspend fun provisionAndRegister(base: String, token: String, serverIp: String, ssid: String, password: String): ProvisionResult = withContext(Dispatchers.IO) {
+        configureStripWifi(serverIp, ssid, password)
+        waitForRegistration(base, token)
+    }
+
+    /** POST /api/strips/scan — starts a network scan, returns the scanId. */
+    suspend fun startScan(base: String, token: String): String = withContext(Dispatchers.IO) {
+        JSONObject(request("$base/api/strips/scan", "{}", token)).optString("scanId")
+    }
+
+    data class ScanResult(val done: Boolean, val strips: List<DiscoveredStrip>)
+
+    /** GET /api/strips/scan/{scanId} — polls scan progress. */
+    suspend fun getScanResult(base: String, token: String, scanId: String): ScanResult = withContext(Dispatchers.IO) {
+        val record = JSONObject(request("$base/api/strips/scan/$scanId", null, token))
+        val status = record.optString("status")
+        ScanResult(done = status == "done" || status == "error", strips = parseDiscovered(record))
+    }
+
+    /** DELETE /api/strips/{id} — removes a strip. */
+    suspend fun deleteStrip(base: String, token: String, stripId: String) = withContext(Dispatchers.IO) {
+        request("$base/api/strips/$stripId", null, token, "DELETE")
+    }
+
+    /** PATCH /api/strips/{id} — update strip name. */
+    suspend fun updateStrip(base: String, token: String, stripId: String, name: String) = withContext(Dispatchers.IO) {
+        val body = JSONObject().put("name", name).toString()
+        request("$base/api/strips/$stripId", body, token, "PATCH")
+    }
+
+    /** POST /api/strips — adopt a discovered strip. */
+    suspend fun adoptStrip(base: String, token: String, strip: DiscoveredStrip) = withContext(Dispatchers.IO) {
+        val body = JSONObject()
+            .put("driverStripId", strip.driverStripId)
+            .put("model", strip.model)
+            .put("relayCount", strip.relayCount)
+            .put("ipAddress", strip.ipAddress)
+            .put("suggestedName", strip.suggestedName)
+            .put("name", strip.suggestedName)
+            .toString()
+        request("$base/api/strips", body, token)
     }
 
     internal fun request(url: String, body: String?, token: String, method: String? = null): String {
@@ -525,6 +572,13 @@ object Api {
             val hint = "Join this phone to the strip setup Wi-Fi (TONLY_TAP_*, password LGU_*) and try again."
             throw ServerException("Could not send $label to $target. $hint")
         }
+    }
+
+    private fun serverAddressForStrip(value: String): String {
+        val trimmed = value.trim()
+        return runCatching {
+            if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) URL(trimmed).host else trimmed
+        }.getOrDefault(trimmed).substringBefore('/').substringBefore(':')
     }
 
     private fun validateProvisionInput(serverIp: String, ssid: String, password: String) {

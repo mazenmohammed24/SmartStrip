@@ -17,8 +17,6 @@ function intEnv(name: string, fallback: number, min: number, max: number): numbe
 export const env = {
   port: Number(process.env.PORT ?? 4001),
   driver: process.env.DRIVER ?? 'mock',
-  voltraAccessToken: process.env.VOLTRA_ACCESS_TOKEN ?? '',
-  voltraBaseUrl: process.env.VOLTRA_BASE_URL ?? 'https://toi.ommeq.com',
   vapidPublicKey: process.env.VAPID_PUBLIC_KEY ?? '',
   vapidPrivateKey: process.env.VAPID_PRIVATE_KEY ?? '',
   vapidSubject: process.env.VAPID_SUBJECT ?? 'mailto:admin@example.com',

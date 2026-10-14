@@ -42,3 +42,7 @@ android/build/
 *.iml
 .kilo/
 .playwright-mcp/
+obj/
+bin/
+.vs/
+*.user

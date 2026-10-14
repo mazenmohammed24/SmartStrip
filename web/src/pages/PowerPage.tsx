@@ -88,7 +88,7 @@ export default function PowerPage() {
         <div className="mb-2 flex items-center justify-between">
           <div>
             <h2 className="text-sm font-semibold text-text">Daily usage</h2>
-            <p className="text-xs text-text-muted">Synced from Voltra energy buckets</p>
+            <p className="text-xs text-text-muted">Stored from local SmartStrip power samples</p>
           </div>
           <label className="flex items-center gap-2 text-sm text-text-muted">
             <input type="checkbox" checked={breakdown} onChange={(e) => setBreakdown(e.target.checked)} className="accent-primary" />

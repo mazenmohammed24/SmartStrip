@@ -101,140 +101,17 @@ import kotlin.math.roundToInt
 
 @Composable
 fun PowerkApp() {
-    var tab by remember { mutableIntStateOf(0) }
-    var snapshot by remember { mutableStateOf<Snapshot?>(null) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var loading by remember { mutableStateOf(false) }
     var showSplash by remember { mutableStateOf(true) }
-    val snackbar = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
-    // "mac:outlet" -> state we are switching to right now (optimistic UI while the strip answers)
-    val pending = remember { mutableStateMapOf<String, Boolean>() }
-
-    suspend fun refresh() {
-        if (!Server.configured) return
-        loading = true
-        try {
-            snapshot = Api.snapshot(Server.base, Server.token)
-            error = null
-        } catch (e: Exception) {
-            error = e.message ?: e.javaClass.simpleName
-            snapshot = null
-        }
-        loading = false
-    }
 
     LaunchedEffect(Unit) {
         delay(1100)
         showSplash = false
     }
 
-    LaunchedEffect(tab, Server.serverUrl, Server.token) {
-        while (true) {
-            refresh()
-            delay(5000)
-        }
-    }
-
-    fun command(mac: String, outlet: Int, on: Boolean) {
-        val keys = if (outlet == 0) (1..4).map { "$mac:$it" } else listOf("$mac:$outlet")
-        if (keys.any { pending.containsKey(it) }) return
-        keys.forEach { pending[it] = on }
-        scope.launch {
-            try {
-                Api.setOutlet(Server.base, Server.token, mac, outlet, on)
-                refresh()
-            } catch (e: Exception) {
-                snackbar.showSnackbar(e.message ?: "command failed")
-            } finally {
-                keys.forEach { pending.remove(it) }
-            }
-        }
-    }
-
-
-    fun updateIcon(mac: String, outlet: Int?, icon: String) {
-        scope.launch {
-            try {
-                if (outlet == null) Api.updateStripIcon(Server.base, Server.token, mac, icon)
-                else Api.updateOutletIcon(Server.base, Server.token, mac, outlet, icon)
-                refresh()
-            } catch (e: Exception) {
-                snackbar.showSnackbar(e.message ?: "icon update failed")
-            }
-        }
-    }
-
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        Scaffold(
-            containerColor = MaterialTheme.colorScheme.background,
-            contentColor = MaterialTheme.colorScheme.onBackground,
-            snackbarHost = { SnackbarHost(snackbar) },
-            bottomBar = {
-                ShortNavigationBar {
-                    ShortNavigationBarItem(
-                        selected = tab == 0,
-                        onClick = { tab = 0 },
-                        icon = { Icon(Icons.Filled.Home, contentDescription = null) },
-                        label = { Text(stringResource(R.string.tab_plugs)) },
-                    )
-                    ShortNavigationBarItem(
-                        selected = tab == 1,
-                        onClick = { tab = 1 },
-                        icon = { Icon(Icons.Filled.Info, contentDescription = null) },
-                        label = { Text(stringResource(R.string.tab_power)) },
-                    )
-                    ShortNavigationBarItem(
-                        selected = tab == 2,
-                        onClick = { tab = 2 },
-                        icon = { Icon(Icons.Filled.Refresh, contentDescription = null) },
-                        label = { Text(stringResource(R.string.tab_automations)) },
-                    )
-                    ShortNavigationBarItem(
-                        selected = tab == 3,
-                        onClick = { tab = 3 },
-                        icon = { Icon(Icons.Filled.Warning, contentDescription = null) },
-                        label = { Text(stringResource(R.string.tab_activity)) },
-                    )
-                    ShortNavigationBarItem(
-                        selected = tab == 4,
-                        onClick = { tab = 4 },
-                        icon = { Icon(Icons.Filled.Info, contentDescription = null) },
-                        label = { Text(stringResource(R.string.tab_notifications)) },
-                    )
-                    ShortNavigationBarItem(
-                        selected = tab == 5,
-                        onClick = { tab = 5 },
-                        icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
-                        label = { Text(stringResource(R.string.tab_settings)) },
-                    )
-                }
-            },
-        ) { padding ->
-            Box(
-                modifier = Modifier.fillMaxSize().padding(padding),
-            ) {
-                when (tab) {
-                    0 -> PlugsScreen(
-                        snapshot = snapshot,
-                        error = error,
-                        loading = loading,
-                        pending = pending,
-                        onRefresh = { scope.launch { refresh() } },
-                        onOpenSettings = { tab = 5 },
-                        onCommand = { mac, outlet, on -> command(mac, outlet, on) },
-                        onIconChange = { mac, outlet, icon -> updateIcon(mac, outlet, icon) },
-                    )
-                    1 -> PowerScreen(snapshot)
-                    2 -> AutomationsScreen(snapshot)
-                    3 -> ActivityScreen(snapshot)
-                    4 -> NotificationsScreen()
-                    else -> SettingsScreen()
-                }
-            }
-        }
+        PowerkNavigation()
 
-        AnimatedVisibility(
+        androidx.compose.animation.AnimatedVisibility(
             visible = showSplash,
             exit = fadeOut(tween(420)) + scaleOut(tween(420), targetScale = 1.06f),
         ) { Splash() }
@@ -1060,6 +937,8 @@ private fun SettingsScreen() {
     var provisionStatus by remember { mutableStateOf<String?>(null) }
     var provisionOk by remember { mutableStateOf(false) }
     var provisionBusy by remember { mutableStateOf(false) }
+    var provisionStep by remember { mutableIntStateOf(0) }
+    var boundStripNetwork by remember { mutableStateOf<android.net.Network?>(null) }
     var lang by remember { mutableStateOf(Lang.code) }
     var accentColor by remember { mutableStateOf(AppTheme.accentColor) }
     val scope = rememberCoroutineScope()
@@ -1334,137 +1213,163 @@ private fun SettingsScreen() {
                     }
                 }
 
-                // --- Strip AP scanner ---
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                ProvisionWizardSteps(currentStep = provisionStep, busy = provisionBusy || connectingAp)
+
+                if (provisionStep == 0) {
                     FilledTonalButton(
                         onClick = { doScan() },
                         enabled = hasLocationPermission && !scanning && !provisionBusy,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
                         Icon(Icons.Default.Refresh, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.provision_step_1_action))
                     }
-                    if (scanning) CircularWavyProgressIndicator(Modifier.size(24.dp))
-                }
-
-                // --- Strip selector dropdown ---
-                if (stripNetworks.isNotEmpty() || selectedStrip != null) {
-                    Box {
-                        OutlinedButton(
-                            onClick = { showStripDropdown = true },
-                            modifier = Modifier.fillMaxWidth(),
-                            enabled = !provisionBusy && !connectingAp,
-                        ) {
-                            Icon(Icons.Default.Info, null, Modifier.size(16.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                selectedStrip?.let { stringResource(R.string.provision_selected_strip, it) }
-                                    ?: stringResource(R.string.provision_strips_found, stripNetworks.size),
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                        }
-                        DropdownMenu(
-                            expanded = showStripDropdown,
-                            onDismissRequest = { showStripDropdown = false },
-                        ) {
-                            stripNetworks.forEach { net ->
-                                DropdownMenuItem(
-                                    text = { Text("${net.ssid}  (${net.rssi} dBm)") },
-                                    onClick = {
-                                        selectedStrip = net.ssid
-                                        showStripDropdown = false
-                                        // Auto-connect to selected strip AP
-                                        scope.launch {
-                                            connectingAp = true
-                                            provisionStatus = context.getString(R.string.provision_connecting_ap, net.ssid)
-                                            provisionOk = false
-                                            val network = WifiHelper.connectToStripAp(context, net.ssid) {
-                                                provisionStatus = context.getString(R.string.provision_connecting_ap, net.ssid)
-                                            }
-                                            connectingAp = false
-                                            if (network != null) {
-                                                provisionStatus = null
-                                            } else {
-                                                provisionStatus = "Could not connect to ${net.ssid}"
-                                                provisionOk = false
-                                            }
-                                        }
-                                    },
+                    if (scanning) CircularWavyProgressIndicator(Modifier.fillMaxWidth())
+                    if (stripNetworks.isNotEmpty() || selectedStrip != null) {
+                        Box {
+                            OutlinedButton(
+                                onClick = { showStripDropdown = true },
+                                modifier = Modifier.fillMaxWidth(),
+                                enabled = !provisionBusy && !connectingAp,
+                            ) {
+                                Icon(Icons.Default.Info, null, Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    selectedStrip?.let { stringResource(R.string.provision_selected_strip, it) }
+                                        ?: stringResource(R.string.provision_strips_found, stripNetworks.size),
+                                    style = MaterialTheme.typography.bodyMedium,
                                 )
                             }
-                        }
-                    }
-                } else if (!scanning && hasLocationPermission) {
-                    Text(
-                        stringResource(R.string.provision_no_strips),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-
-                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                    OutlinedTextField(
-                        value = provisionIp,
-                        onValueChange = { provisionIp = it },
-                        label = { Text(stringResource(R.string.field_server_ip_for_strip)) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    OutlinedTextField(
-                        value = provisionSsid,
-                        onValueChange = { provisionSsid = it },
-                        label = { Text(stringResource(R.string.field_wifi_ssid)) },
-                        placeholder = {
-                            val detected = WifiHelper.getCurrentSsid(context)
-                            if (detected.isNotBlank() && !detected.startsWith("TONLY_TAP_"))
-                                Text(stringResource(R.string.provision_home_ssid_hint, detected),
-                                    style = MaterialTheme.typography.bodySmall)
-                        },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    OutlinedTextField(
-                        value = provisionPassword,
-                        onValueChange = { provisionPassword = it },
-                        label = { Text(stringResource(R.string.field_wifi_password)) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-                Button(
-                    enabled = Server.configured && !provisionBusy && !connectingAp,
-                    onClick = {
-                        commit()
-                        provisionBusy = true
-                        provisionStatus = null
-                        scope.launch {
-                            val ssid = provisionSsid.trim().ifBlank { WifiHelper.getCurrentSsid(context) }
-                            val stripSsid = selectedStrip
-                            try {
-                                // If a strip is selected but we're not yet on its AP, connect first
-                                if (stripSsid != null) {
-                                    connectingAp = true
-                                    provisionStatus = context.getString(R.string.provision_connecting_ap, stripSsid)
-                                    val network = WifiHelper.connectToStripAp(context, stripSsid)
-                                    connectingAp = false
-                                    if (network != null) {
-                                        WifiHelper.bindProcessToNetwork(context, network)
-                                    }
+                            DropdownMenu(expanded = showStripDropdown, onDismissRequest = { showStripDropdown = false }) {
+                                stripNetworks.forEach { net ->
+                                    DropdownMenuItem(
+                                        text = { Text("${net.ssid}  (${net.rssi} dBm)") },
+                                        onClick = { selectedStrip = net.ssid; showStripDropdown = false },
+                                    )
                                 }
-                                val result = Api.provisionAndRegister(Server.base, Server.token, provisionIp.trim(), ssid, provisionPassword)
-                                provisionStatus = result.message
-                                provisionOk = result.registered
-                            } catch (e: Exception) {
-                                provisionStatus = e.message ?: "provisioning failed"
-                                provisionOk = false
-                            } finally {
-                                WifiHelper.releaseStripNetwork(context)
-                                provisionBusy = false
-                                connectingAp = false
                             }
                         }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text(stringResource(R.string.provision_and_register)) }
+                    } else if (!scanning && hasLocationPermission) {
+                        Text(stringResource(R.string.provision_no_strips), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Button(
+                        enabled = selectedStrip != null && !connectingAp,
+                        onClick = {
+                            val stripSsid = selectedStrip ?: return@Button
+                            scope.launch {
+                                connectingAp = true
+                                provisionStatus = context.getString(R.string.provision_connecting_ap, stripSsid)
+                                val network = WifiHelper.connectToStripAp(context, stripSsid)
+                                connectingAp = false
+                                if (network != null) {
+                                    WifiHelper.bindProcessToNetwork(context, network)
+                                    boundStripNetwork = network
+                                    provisionStep = 1
+                                    provisionStatus = context.getString(R.string.provision_step_1_done)
+                                    provisionOk = true
+                                } else {
+                                    provisionStatus = context.getString(R.string.provision_step_1_failed, stripSsid)
+                                    provisionOk = false
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(stringResource(R.string.provision_step_1_button)) }
+                }
+
+                if (provisionStep == 1) {
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                        OutlinedTextField(
+                            value = provisionSsid,
+                            onValueChange = { provisionSsid = it },
+                            label = { Text(stringResource(R.string.field_wifi_ssid)) },
+                            placeholder = {
+                                val detected = WifiHelper.getCurrentSsid(context)
+                                if (detected.isNotBlank() && !detected.startsWith("TONLY_TAP_")) Text(stringResource(R.string.provision_home_ssid_hint, detected), style = MaterialTheme.typography.bodySmall)
+                            },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        OutlinedTextField(
+                            value = provisionPassword,
+                            onValueChange = { provisionPassword = it },
+                            label = { Text(stringResource(R.string.field_wifi_password)) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    Button(
+                        enabled = provisionPassword.isNotBlank(),
+                        onClick = { provisionStep = 2; provisionStatus = context.getString(R.string.provision_step_2_done); provisionOk = true },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(stringResource(R.string.provision_next)) }
+                }
+
+                if (provisionStep == 2) {
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                        OutlinedTextField(
+                            value = serverUrl,
+                            onValueChange = { serverUrl = it; provisionIp = it },
+                            label = { Text(stringResource(R.string.field_server_url)) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        OutlinedTextField(
+                            value = provisionIp,
+                            onValueChange = { provisionIp = it },
+                            label = { Text(stringResource(R.string.field_server_ip_for_strip)) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    Button(
+                        enabled = serverUrl.isNotBlank() && provisionIp.isNotBlank(),
+                        onClick = { commit(); provisionStep = 3; provisionStatus = context.getString(R.string.provision_step_3_done); provisionOk = true },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(stringResource(R.string.provision_next)) }
+                }
+
+                if (provisionStep == 3) {
+                    Button(
+                        enabled = Server.configured && !provisionBusy && !connectingAp,
+                        onClick = {
+                            commit()
+                            provisionBusy = true
+                            provisionStatus = context.getString(R.string.provision_step_4_running)
+                            provisionOk = false
+                            scope.launch {
+                                val ssid = provisionSsid.trim().ifBlank { WifiHelper.getCurrentSsid(context) }
+                                try {
+                                    boundStripNetwork?.let { WifiHelper.bindProcessToNetwork(context, it) }
+                                    Api.configureStripWifi(provisionIp.trim(), ssid, provisionPassword)
+                                    WifiHelper.releaseStripNetwork(context)
+                                    provisionStatus = context.getString(R.string.provision_waiting_registration)
+                                    val result = Api.waitForRegistration(Server.base, Server.token)
+                                    provisionStatus = result.message
+                                    provisionOk = result.registered
+                                    if (result.registered) provisionStep = 4
+                                } catch (e: Exception) {
+                                    provisionStatus = e.message ?: "provisioning failed"
+                                    provisionOk = false
+                                } finally {
+                                    WifiHelper.releaseStripNetwork(context)
+                                    provisionBusy = false
+                                    connectingAp = false
+                                    boundStripNetwork = null
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(stringResource(R.string.provision_step_4_button)) }
+                }
+
+                if (provisionStep == 4) {
+                    Button(
+                        onClick = { provisionStep = 0; provisionStatus = null; provisionOk = false; selectedStrip = null },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(stringResource(R.string.provision_start_over)) }
+                }
                 if (provisionBusy || connectingAp) CircularWavyProgressIndicator(Modifier.fillMaxWidth())
                 AnimatedVisibility(visible = provisionStatus != null, enter = fadeIn(), exit = fadeOut()) {
                     Surface(
@@ -1503,6 +1408,49 @@ private fun SettingsScreen() {
                     stringResource(R.string.setup_footer),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun ProvisionWizardSteps(currentStep: Int, busy: Boolean) {
+    val labels = listOf(
+        stringResource(R.string.provision_wizard_1),
+        stringResource(R.string.provision_wizard_2),
+        stringResource(R.string.provision_wizard_3),
+        stringResource(R.string.provision_wizard_4),
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        labels.forEachIndexed { index, label ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                val done = currentStep > index
+                val active = currentStep == index
+                Surface(
+                    shape = CircleShape,
+                    color = when {
+                        done -> MaterialTheme.colorScheme.primary
+                        active -> MaterialTheme.colorScheme.primaryContainer
+                        else -> MaterialTheme.colorScheme.surfaceContainerHighest
+                    },
+                    contentColor = when {
+                        done -> MaterialTheme.colorScheme.onPrimary
+                        active -> MaterialTheme.colorScheme.onPrimaryContainer
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(if (done) "?" else "${index + 1}", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+                Text(
+                    label + if (busy && active) "?" else "",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (active) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }

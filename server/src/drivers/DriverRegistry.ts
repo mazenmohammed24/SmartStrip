@@ -3,7 +3,6 @@ import { localIPv4s } from '../utils/localIp.js';
 import { MockDriver } from './mock/MockDriver.js';
 import { MttlDriver } from './mttl/MttlDriver.js';
 import type { StripDriver } from './StripDriver.js';
-import { VoltraDriver } from './voltra/VoltraDriver.js';
 
 let activeDriver: StripDriver | null = null;
 
@@ -14,15 +13,6 @@ let activeDriver: StripDriver | null = null;
  */
 export async function initDriver(): Promise<StripDriver> {
   switch (env.driver) {
-    case 'voltra':
-      if (!env.voltraAccessToken) {
-        throw new Error('VOLTRA_ACCESS_TOKEN is required when DRIVER=voltra');
-      }
-      activeDriver = new VoltraDriver({
-        accessToken: env.voltraAccessToken,
-        baseUrl: env.voltraBaseUrl,
-      });
-      break;
     case 'mttl':
       // No credentials: the strip dials this server on TCP 10086 and is
       // provisioned once through its own setup access point.

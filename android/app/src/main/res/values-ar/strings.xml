@@ -57,6 +57,21 @@
     <string name="provision_need_location">صلاحية الموقع مطلوبة للبحث عن شبكات Wi-Fi</string>
     <string name="grant_permission">منح الصلاحية</string>
     <string name="provision_home_ssid_hint">تم اكتشاف: %1$s</string>
+    <string name="provision_wizard_1">الاتصال بشبكة المشترك</string>
+    <string name="provision_wizard_2">إضافة واي فاي البيت</string>
+    <string name="provision_wizard_3">إضافة رابط السيرفر</string>
+    <string name="provision_wizard_4">إنهاء الإعداد والتسجيل</string>
+    <string name="provision_step_1_action">ابحث عن شبكات المشترك</string>
+    <string name="provision_step_1_button">اتصل بشبكة المشترك المختارة</string>
+    <string name="provision_step_1_done">تم الاتصال بشبكة إعداد المشترك.</string>
+    <string name="provision_step_1_failed">تعذر الاتصال بـ %1$s</string>
+    <string name="provision_step_2_done">تم حفظ بيانات واي فاي البيت للمعالج.</string>
+    <string name="provision_step_3_done">تم حفظ رابط السيرفر. جاهز لإرسال الإعداد للمشترك.</string>
+    <string name="provision_step_4_running">جاري كتابة الإعداد على المشترك…</string>
+    <string name="provision_step_4_button">إنهاء الإعداد وانتظار التسجيل</string>
+    <string name="provision_waiting_registration">تم إرسال الإعداد. في انتظار تسجيل المشترك على APIs السيرفر…</string>
+    <string name="provision_next">التالي</string>
+    <string name="provision_start_over">ابدأ من جديد</string>
     <string name="save">حفظ</string>
     <string name="test">اختبار</string>
     <string name="saved">اتحفظ</string>
@@ -114,4 +129,34 @@
     <string name="run_now">شغّل الآن</string>
     <string name="enable">تفعيل</string>
     <string name="disable">إيقاف</string>
+
+    <string name="all_strips">كل الوصلات</string>
+    <string name="all_on">كل شيء ON</string>
+    <string name="all_off">كل شيء OFF</string>
+    <string name="online">متصل</string>
+    <string name="offline">غير متصل</string>
+    <string name="outlets_title">المنافذ</string>
+    <string name="cancel">إلغاء</string>
+    <string name="strip_name_label">اسم الوصلة</string>
+
+    <string name="scan_title">مسح الشبكة</string>
+    <string name="scan_body">اكتشاف أجهزة SmartStrip الجديدة على شبكتك المحلية.</string>
+    <string name="scan_start">مسح</string>
+    <string name="scan_in_progress">جاري المسح عن الأجهزة…</string>
+    <string name="scan_empty_title">مفيش وصلات لقيناها</string>
+    <string name="scan_empty_body">ما لقيناش أجهزة SmartStrip على الشبكة دي. تأكد إن الوصلة شغّالة ومتصلة بنفس الواي فاي.</string>
+    <string name="scan_adopt">إضافة وصلة</string>
+
+    <string name="strip_not_found">الوصلة مش موجودة</string>
+    <string name="strip_not_found_body">مش قادر يحمّل الوصلة دي. يمكن تم حذفها.</string>
+    <string name="delete_strip_confirm_title">تحذف الوصلة؟</string>
+    <string name="delete_strip_confirm_body">تشيل "%1$s" من السيرفر؟ مش هيرجع.</string>
+
+    <string name="provision_start">إعداد وصلة جديدة</string>
+    <string name="provision_send">إرسال الإعدادات</string>
+    <string name="provision_done">تم</string>
+    <string name="provision_ok">تم إعداد الوصلة وتسجيلها!</string>
+    <string name="provision_ssid">اسم الواي فاي المنزلي (SSID)</string>
+    <string name="provision_step_3_body">جاهز لإرسال معلومات الواي فاي والسيرفر للوصلة. اضغط إرسال للبدء.</string>
+    <string name="provision_step_1_found">لقينا %1$d شبكة وصلة</string>
 </resources>

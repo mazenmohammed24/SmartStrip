@@ -99,11 +99,6 @@ export interface MainDbSchema {
   notifications: StoredNotification[];
   pushSubscriptions: StoredPushSubscription[];
   settings: StoredSettings;
-  voltraTokens?: {
-    accessToken: string;
-    refreshToken: string;
-    expiresAt: string | null;
-  };
 }
 
 export const defaultSettings: StoredSettings = {

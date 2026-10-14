@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '../components/ui/Button';
 import { Card, CardBody } from '../components/ui/Card';
 import { Input, Label, Select } from '../components/ui/Input';
@@ -13,10 +13,6 @@ export default function SettingsPage() {
   const updateSettings = useSettingsStore((s) => s.updateSettings);
 
   const [pushTestMsg, setPushTestMsg] = useState<string | null>(null);
-  const [voltraAccessToken, setVoltraAccessToken] = useState('');
-  const [voltraRefreshToken, setVoltraRefreshToken] = useState('');
-  const [voltraMsg, setVoltraMsg] = useState<string | null>(null);
-  const [voltraLoading, setVoltraLoading] = useState(false);
 
   useEffect(() => {
     void fetchSettings();
@@ -31,22 +27,6 @@ const sendTestPush = async () => {
       setPushTestMsg('Test push sent.');
     } catch (err) {
       setPushTestMsg(err instanceof Error ? err.message : 'Failed to send test push');
-    }
-  };
-
-  const saveVoltraTokens = async (e: FormEvent) => {
-    e.preventDefault();
-    setVoltraMsg(null);
-    setVoltraLoading(true);
-    try {
-      await api.post('/settings/voltra-tokens', { accessToken: voltraAccessToken, refreshToken: voltraRefreshToken });
-      setVoltraMsg('Voltra tokens saved. SmartStrip will refresh the access token automatically.');
-      setVoltraAccessToken('');
-      setVoltraRefreshToken('');
-    } catch (err) {
-      setVoltraMsg(err instanceof Error ? err.message : 'Failed to save Voltra tokens');
-    } finally {
-      setVoltraLoading(false);
     }
   };
 
@@ -160,44 +140,7 @@ const sendTestPush = async () => {
         </CardBody>
       </Card>
 
-      <Card>
-        <CardBody className="flex flex-col gap-4">
-          <div>
-            <h2 className="text-sm font-semibold text-text">Voltra remote API</h2>
-            <p className="mt-1 text-sm text-text-muted">
-              Store the Voltra access token and refresh token so SmartStrip can renew remote API access automatically.
-            </p>
-          </div>
-          <form onSubmit={saveVoltraTokens} className="grid gap-3 sm:max-w-md">
-            <div>
-              <Label htmlFor="voltraAccessToken">Access token</Label>
-              <Input
-                id="voltraAccessToken"
-                type="password"
-                value={voltraAccessToken}
-                onChange={(e) => setVoltraAccessToken(e.target.value)}
-                autoComplete="off"
-                required
-              />
-            </div>
-            <div>
-              <Label htmlFor="voltraRefreshToken">Refresh token</Label>
-              <Input
-                id="voltraRefreshToken"
-                type="password"
-                value={voltraRefreshToken}
-                onChange={(e) => setVoltraRefreshToken(e.target.value)}
-                autoComplete="off"
-                required
-              />
-            </div>
-            {voltraMsg && <p className="text-xs text-text-muted">{voltraMsg}</p>}
-            <Button type="submit" size="sm" loading={voltraLoading} className="self-start">
-              Save Voltra tokens
-            </Button>
-          </form>
-        </CardBody>
-      </Card>
+
 
 <Card>
         <CardBody>

@@ -57,6 +57,21 @@
     <string name="provision_need_location">Location permission required to scan Wi-Fi networks</string>
     <string name="grant_permission">Grant permission</string>
     <string name="provision_home_ssid_hint">Detected: %1$s</string>
+    <string name="provision_wizard_1">Connect to strip AP</string>
+    <string name="provision_wizard_2">Add home Wi-Fi</string>
+    <string name="provision_wizard_3">Add server URL</string>
+    <string name="provision_wizard_4">Finish setup and register</string>
+    <string name="provision_step_1_action">Scan for strip APs</string>
+    <string name="provision_step_1_button">Connect to selected strip AP</string>
+    <string name="provision_step_1_done">Connected to the strip setup network.</string>
+    <string name="provision_step_1_failed">Could not connect to %1$s</string>
+    <string name="provision_step_2_done">Home Wi-Fi details saved for this wizard.</string>
+    <string name="provision_step_3_done">Server URL saved. Ready to write setup to the strip.</string>
+    <string name="provision_step_4_running">Writing setup to the strip…</string>
+    <string name="provision_step_4_button">Finish setup and wait for registration</string>
+    <string name="provision_waiting_registration">Setup sent. Waiting for the strip to register on the server APIs…</string>
+    <string name="provision_next">Next</string>
+    <string name="provision_start_over">Start over</string>
     <string name="save">Save</string>
     <string name="test">Test</string>
     <string name="saved">Saved</string>
@@ -114,4 +129,34 @@
     <string name="run_now">Run now</string>
     <string name="enable">Enable</string>
     <string name="disable">Disable</string>
+
+    <string name="all_strips">All strips</string>
+    <string name="all_on">All on</string>
+    <string name="all_off">All off</string>
+    <string name="online">Online</string>
+    <string name="offline">Offline</string>
+    <string name="outlets_title">Outlets</string>
+    <string name="cancel">Cancel</string>
+    <string name="strip_name_label">Strip name</string>
+
+    <string name="scan_title">Scan Network</string>
+    <string name="scan_body">Discover new SmartStrip devices on your local network.</string>
+    <string name="scan_start">Scan</string>
+    <string name="scan_in_progress">Scanning for devices…</string>
+    <string name="scan_empty_title">No strips found</string>
+    <string name="scan_empty_body">No SmartStrip devices were found on this network. Make sure the strip is powered on and connected to the same Wi-Fi.</string>
+    <string name="scan_adopt">Add strip</string>
+
+    <string name="strip_not_found">Strip not found</string>
+    <string name="strip_not_found_body">Could not load this strip. It may have been removed.</string>
+    <string name="delete_strip_confirm_title">Delete strip?</string>
+    <string name="delete_strip_confirm_body">Remove "%1$s" from the server? This cannot be undone.</string>
+
+    <string name="provision_start">Provision new strip</string>
+    <string name="provision_send">Send configuration</string>
+    <string name="provision_done">Done</string>
+    <string name="provision_ok">Strip provisioned and registered!</string>
+    <string name="provision_ssid">Home Wi-Fi name (SSID)</string>
+    <string name="provision_step_3_body">Ready to send your home Wi-Fi and server info to the strip. Press send to start.</string>
+    <string name="provision_step_1_found">Found %1$d strip AP(s)</string>
 </resources>
