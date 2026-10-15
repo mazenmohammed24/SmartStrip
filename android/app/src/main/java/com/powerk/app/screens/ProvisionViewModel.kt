@@ -49,6 +49,9 @@ class ProvisionViewModel(application: Application) : AndroidViewModel(applicatio
     var foundStripIp by mutableStateOf<String?>(null)
     var reconnecting by mutableStateOf(false)
 
+    /** False when location services are off, which makes Android report every Wi-Fi scan as empty. */
+    var locationEnabled by mutableStateOf(true)
+
     private val ctx get() = getApplication<Application>()
     private var keepAliveJob: Job? = null
 
@@ -65,6 +68,16 @@ class ProvisionViewModel(application: Application) : AndroidViewModel(applicatio
             onNeedPermission()
             return
         }
+        // Android reports an empty scan result list - not an error - while location services are
+        // off, so surface the real cause instead of the misleading "no strip APs found".
+        locationEnabled = WifiHelper.isLocationEnabled(ctx)
+        if (!locationEnabled) {
+            stripNetworks = emptyList()
+            selectedStrip = null
+            provisionOk = false
+            provisionStatus = ctx.getString(R.string.provision_location_off)
+            return
+        }
         viewModelScope.launch {
             scanning = true
             provisionStatus = ctx.getString(R.string.provision_scanning)
@@ -75,6 +88,11 @@ class ProvisionViewModel(application: Application) : AndroidViewModel(applicatio
             provisionOk = stripNetworks.isNotEmpty()
             scanning = false
         }
+    }
+
+    /** Opens the system location-source page, mirroring the vendor app's `openLocationSettings`. */
+    fun openLocationSettings() {
+        runCatching { ctx.startActivity(WifiHelper.locationSettingsIntent()) }
     }
 
     fun resetWizard() {
@@ -169,6 +187,14 @@ class ProvisionViewModel(application: Application) : AndroidViewModel(applicatio
     // keeps all entered data and just re-attempts the race) can trigger the exact same flow.
     fun attemptConnectAndSend() {
         val strip = selectedStrip ?: return
+        // Reject credentials the strip could never join before spending the brief connectivity
+        // window on a connect, send and wait that is guaranteed to end in a strip that never
+        // registers. See WifiHelper.homeWifiValidationError.
+        WifiHelper.homeWifiValidationError(provisionSsid, provisionPassword)?.let { problem ->
+            provisionStatus = problem
+            provisionOk = false
+            return
+        }
         connectingAp = true
         connectAttempted = true
         reconnecting = false

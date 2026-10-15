@@ -50,7 +50,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -159,6 +162,8 @@ fun SettingsScreen() {
     }
 
     fun doScan() = provisionVm.doScan(hasLocationPermission && hasNearbyWifiPermission) { requestWifiPermissions() }
+
+    fun openLocationSettings() = provisionVm.openLocationSettings()
 
     fun commit() = Server.save(serverUrl, token)
 
@@ -287,6 +292,15 @@ fun SettingsScreen() {
                                 onValueChange = { provisionVm.provisionSsid = it },
                                 label = { Text(stringResource(R.string.field_wifi_ssid)) },
                                 singleLine = true,
+                                // SSIDs are case-sensitive and can be anything the router admin
+                                // typed; autocorrect/autocapitalize "fixing" it behind the user's
+                                // back silently sends the strip a home network name that doesn't
+                                // exist, which it then can never join.
+                                keyboardOptions = KeyboardOptions(
+                                    capitalization = KeyboardCapitalization.None,
+                                    autoCorrectEnabled = false,
+                                    keyboardType = KeyboardType.Ascii,
+                                ),
                                 modifier = Modifier.fillMaxWidth(),
                             )
                             OutlinedTextField(
@@ -295,6 +309,18 @@ fun SettingsScreen() {
                                 label = { Text(stringResource(R.string.field_wifi_password)) },
                                 singleLine = true,
                                 visualTransformation = PasswordVisualTransformation(),
+                                // KeyboardType.Password (not just the visual mask above) is what
+                                // actually tells the IME to turn off autocorrect/autocapitalize/
+                                // predictive suggestions. Without it the field *looks* like a
+                                // password box but Gboard etc. still "autocorrects" the typed
+                                // passphrase — the strip then gets a plausible-but-wrong password,
+                                // can never join the home network, and is left endlessly retrying
+                                // (the panicking/flashing behaviour reported from real strips).
+                                keyboardOptions = KeyboardOptions(
+                                    capitalization = KeyboardCapitalization.None,
+                                    autoCorrectEnabled = false,
+                                    keyboardType = KeyboardType.Password,
+                                ),
                                 modifier = Modifier.fillMaxWidth(),
                             )
                         }
@@ -315,6 +341,21 @@ fun SettingsScreen() {
                                 Modifier.padding(12.dp),
                                 style = MaterialTheme.typography.bodySmall,
                             )
+                        }
+                        if (!provisionVm.locationEnabled) {
+                            Surface(
+                                shape = MaterialTheme.shapes.medium,
+                                color = MaterialTheme.colorScheme.errorContainer,
+                                contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text(stringResource(R.string.provision_location_off), style = MaterialTheme.typography.bodySmall)
+                                    OutlinedButton(onClick = { openLocationSettings() }, modifier = Modifier.fillMaxWidth()) {
+                                        Text(stringResource(R.string.provision_open_location_settings))
+                                    }
+                                }
+                            }
                         }
                         FilledTonalButton(
                             onClick = { doScan() },

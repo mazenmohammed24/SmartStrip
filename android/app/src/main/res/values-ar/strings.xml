@@ -52,6 +52,8 @@
     <string name="provision_scanning">جاري البحث… خلي المشترك شغال وقريب.</string>
     <string name="provision_no_strips">مفيش شبكات TONLY_TAP_*</string>
     <string name="provision_no_strips_found">مفيش شبكات TONLY_TAP_*. خلي المشترك في وضع الإعداد وجرب البحث تاني.</string>
+    <string name="provision_location_off">خدمة الموقع مقفولة. أندرويد بيرجّع نتيجة بحث فاضية وخدمة الموقع مقفولة، فمش هيلاقي أي مشترك — شغّل خدمة الموقع وجرب البحث تاني.</string>
+    <string name="provision_open_location_settings">افتح إعدادات الموقع</string>
     <string name="provision_connecting_strip">جاري الاتصال بـ %1$s… وافق على رسالة Wi-Fi لو ظهرت.</string>
     <string name="provision_connect_strip_failed">تعذر الاتصال بشبكة المشترك. قرب منه وخليه في وضع الإعداد وجرب تاني.</string>
     <string name="provision_strip_connected">تم الاتصال بشبكة المشترك. اكتب كلمة مرور واي فاي البيت فقط.</string>
@@ -61,6 +63,10 @@
     <string name="provision_selected_strip">المشترك: %1$s</string>
     <string name="provision_connecting_ap">جاري الاتصال بـ %1$s…</string>
     <string name="provision_need_location">صلاحية الموقع مطلوبة للبحث عن شبكات Wi-Fi</string>
+    <string name="provision_step_0_hint">ابحث عن شبكات إعداد المشترك القريبة. الفيرموير الأصلي بيعمل شبكة TONLY_TAP_* (WPA2)، والفيرموير المستقل بيعمل شبكة مفتوحة اسمها MTTL-W01-SETUP.</string>
+    <string name="provision_step_1_standalone_hint">اكتب اسم واي فاي البيت وكلمة المرور. المشترك هيتصل بشبكة البيت — مش محتاج عنوان سيرفر.</string>
+    <string name="provision_step_1_stock_hint">اكتب اسم واي فاي البيت وكلمة المرور. المشترك هيتصل بالسيرفر عن طريق TCP.</string>
+    <string name="provision_step_2_confirm">أكد بيانات الإعداد</string>
     <string name="grant_permission">منح الصلاحية</string>
     <string name="provision_home_ssid_hint">تم اكتشاف: %1$s</string>
     <string name="provision_wizard_1">واي فاي البيت</string>

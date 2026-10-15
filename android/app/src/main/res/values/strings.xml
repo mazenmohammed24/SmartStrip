@@ -52,6 +52,8 @@
     <string name="provision_scanning">Scanning… keep the strip powered on and nearby.</string>
     <string name="provision_no_strips">No strip APs found</string>
     <string name="provision_no_strips_found">No strip APs found. Make sure the strip is in setup mode (TONLY_TAP_* or MTTL-W01-SETUP), then scan again.</string>
+    <string name="provision_location_off">Location is turned off. Android returns an empty Wi-Fi scan while it is off, so no strip can be found — turn location on, then scan again.</string>
+    <string name="provision_open_location_settings">Open location settings</string>
     <string name="provision_connecting_strip">Connecting to %1$s… accept the Android Wi-Fi prompt if it appears.</string>
     <string name="provision_connect_strip_failed">Could not connect to the strip AP. Move closer, keep setup mode on, and try again.</string>
     <string name="provision_strip_connected">Connected to the strip AP.</string>

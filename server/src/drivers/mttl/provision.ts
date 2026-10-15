@@ -30,6 +30,10 @@ export interface ProvisionResult {
 /**
  * The command grammar is colon-separated with no escaping, so a credential
  * containing a colon would silently split into the wrong fields. Refuse instead.
+ *
+ * The passphrase is additionally held to the WPA2 rules the strip's supplicant enforces: a
+ * passphrase it cannot accept is accepted here, written to flash, and then shows up as a strip
+ * that never joins the network and never registers - with nothing in the reply to say why.
  */
 export function assertProvisionableCredentials(ssid: string, password: string): void {
   for (const [label, value] of [['SSID', ssid], ['password', password]] as const) {
@@ -37,6 +41,20 @@ export function assertProvisionableCredentials(ssid: string, password: string): 
     if (/[:\r\n]/.test(value)) {
       throw new Error(`${label} cannot contain ":" or a newline - the strip's provisioning protocol has no escaping`);
     }
+  }
+  assertWpa2Passphrase(password);
+}
+
+/** A WPA2 passphrase is 8-63 characters, or a 64-digit hex PSK. */
+const WPA2_HEX_PSK = /^[0-9A-Fa-f]{64}$/;
+
+export function assertWpa2Passphrase(password: string): void {
+  if (WPA2_HEX_PSK.test(password)) return;
+  if (password.length < 8 || password.length > 63) {
+    throw new Error(`Wi-Fi password must be 8-63 characters (or 64 hex digits), but this one is ${password.length}`);
+  }
+  if (/[^\x20-\x7e]/.test(password)) {
+    throw new Error('Wi-Fi password can only contain printable ASCII characters');
   }
 }
 

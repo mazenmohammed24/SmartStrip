@@ -80,6 +80,9 @@ export function ProvisionCard() {
           <div>
             <Label htmlFor="provisionPassword">Home Wi-Fi password</Label>
             <Input id="provisionPassword" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+            <p className="mt-1 text-xs text-text-muted">
+              8-63 characters (or 64 hex digits) - anything else is a WPA2 passphrase the strip cannot join with.
+            </p>
           </div>
 
           {error && <p className="text-sm text-danger">{error}</p>}

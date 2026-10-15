@@ -1,21 +1,32 @@
 ﻿package com.powerk.app
 
 import android.content.Context
+import android.content.Intent
+import android.location.LocationManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.net.wifi.WifiConfiguration
 import android.net.wifi.WifiManager
 import android.net.wifi.WifiNetworkSpecifier
 import android.os.Build
+import android.provider.Settings
 import android.util.Log
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 import java.util.concurrent.atomic.AtomicReference
 
 private const val STRIP_SSID_PREFIX = "TONLY_TAP_"
 private const val STANDALONE_SSID = "MTTL-W01-SETUP"
 private const val STRIP_AP_PASSWORD_PREFIX = "LGU_"
+
+/** A pre-Android-10 join associates asynchronously; this bounds how long we wait for it. */
+private const val LEGACY_JOIN_TIMEOUT_MS = 20_000L
+
+/** A WPA2 passphrase is 8-63 chars, or a 64-digit hex PSK. Android rejects anything else. */
+private val WPA2_HEX_PSK = Regex("^[0-9A-Fa-f]{64}$")
 
 enum class StripApType { STOCK, STANDALONE }
 
@@ -73,6 +84,53 @@ object WifiHelper {
         } catch (_: Exception) {
             ""
         }
+    }
+
+    /**
+     * Whether location *services* are on. Android answers a Wi-Fi scan with an empty list rather
+     * than an error when they are off, so without this check "the strip is not in setup mode" is
+     * reported for what is really a system toggle. Mirrors the vendor app's `locationEnabled`
+     * bridge call.
+     */
+    fun isLocationEnabled(context: Context): Boolean = try {
+        val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            lm.isLocationEnabled
+        } else {
+            @Suppress("DEPRECATION")
+            lm.isProviderEnabled(LocationManager.GPS_PROVIDER) || lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        }
+    } catch (_: Exception) {
+        // Fail open: where the query itself is unavailable, blocking provisioning would be wrong.
+        true
+    }
+
+    /** The system location-source page, mirroring the vendor app's `openLocationSettings` bridge call. */
+    fun locationSettingsIntent(): Intent =
+        Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+    /**
+     * Rejects home Wi-Fi credentials the strip could never join, before they are sent to it.
+     *
+     * The vendor app lets `WifiNetworkSpecifier.setWpa2Passphrase` throw for these and reports the
+     * whole attempt as failed; catching it here means a typo is reported as a typo, instead of as a
+     * strip that accepted the setup and then never joined the network or registered.
+     *
+     * Returns a user-facing message, or null when the credentials are usable.
+     */
+    fun homeWifiValidationError(ssid: String, password: String): String? {
+        val name = ssid.trim()
+        if (name.isEmpty()) return "Home Wi-Fi name is required."
+        if (name.any { it.code < 0x20 || it.code == 0x7F }) return "Home Wi-Fi name contains control characters."
+        if (password.isEmpty()) return "Home Wi-Fi password is required."
+        if (WPA2_HEX_PSK.matches(password)) return null
+        if (password.length < 8 || password.length > 63) {
+            return "A WPA2 password must be 8-63 characters (or 64 hex digits), but this one is ${password.length}."
+        }
+        if (password.any { it.code < 0x20 || it.code > 0x7E }) {
+            return "A WPA2 password can only contain printable ASCII characters."
+        }
+        return null
     }
 
     /** Scans for nearby strip APs: TONLY_TAP_* (stock) and MTTL-W01-SETUP (standalone). */
@@ -157,7 +215,13 @@ object WifiHelper {
         onConnecting: () -> Unit = {},
         onLost: ((fastRoamBack: Boolean) -> Unit)? = null,
     ): Network? {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            // NetworkSpecifier + requestNetwork only exist from API 29. Below that the vendor app's
+            // WifiConfiguration flow is the only way to join the strip, and this branch used to just
+            // give up and report "could not connect to the strip AP".
+            releaseStripNetwork(context)
+            return joinStripApLegacy(context, ssid, stripApPassword(ssid), onLost)
+        }
 
         // Release any previous connection first.
         releaseStripNetwork(context)
@@ -240,13 +304,26 @@ object WifiHelper {
         val net = cm.activeNetwork ?: return null
         val caps = cm.getNetworkCapabilities(net) ?: return null
         if (!caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return null
-        val currentSsid = (caps.transportInfo as? android.net.wifi.WifiInfo)?.ssid
-            .orEmpty().removeSurrounding("\"")
+        val currentSsid = wifiSsidOf(caps)
         if (currentSsid.isBlank() || currentSsid != ssid) return null
 
         // Clear any stale registration before taking over bookkeeping for this network.
         releaseStripNetwork(context)
+        Log.i("WifiHelper", "Reusing already-connected network for ssid=$ssid: $net")
+        return adoptNetwork(cm, net, onLost)
+    }
 
+    /**
+     * Takes over bookkeeping for a network the phone is already associated with: binds the process
+     * to it, tells the OS the no-internet link is working so it is not torn down, and registers the
+     * passive callback that keeps [keepAlive]/[onLost] working. Shared by the already-connected
+     * fast path and the pre-Android-10 join.
+     */
+    private fun adoptNetwork(
+        cm: ConnectivityManager,
+        net: Network,
+        onLost: ((fastRoamBack: Boolean) -> Unit)?,
+    ): Network {
         val availableAt = System.currentTimeMillis()
         val request = NetworkRequest.Builder()
             .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
@@ -256,7 +333,7 @@ object WifiHelper {
                 if (network != net) return
                 val elapsed = System.currentTimeMillis() - availableAt
                 val fastRoamBack = elapsed < FAST_ROAM_BACK_MS
-                Log.w("WifiHelper", "onLost (reused): $network autoReconnect=$autoReconnectEnabled elapsed=${elapsed}ms fastRoamBack=$fastRoamBack")
+                Log.w("WifiHelper", "onLost (adopted): $network autoReconnect=$autoReconnectEnabled elapsed=${elapsed}ms fastRoamBack=$fastRoamBack")
                 if (autoReconnectEnabled) onLost?.invoke(fastRoamBack)
             }
         }
@@ -265,8 +342,71 @@ object WifiHelper {
         runCatching { cm.reportNetworkConnectivity(net, true) }
         autoReconnectEnabled = true
         runCatching { cm.registerNetworkCallback(request, cb) }
-        Log.i("WifiHelper", "Reusing already-connected network for ssid=$ssid: $net")
         return net
+    }
+
+    /**
+     * `NetworkCapabilities.getTransportInfo` only exists from API 29, so reading it unguarded is a
+     * `NoSuchMethodError` on the older devices this app still installs on.
+     */
+    private fun wifiSsidOf(caps: NetworkCapabilities): String =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            (caps.transportInfo as? android.net.wifi.WifiInfo)?.ssid.orEmpty().removeSurrounding("\"")
+        } else {
+            ""
+        }
+
+    /**
+     * Pre-Android-10 join, mirroring the vendor app's non-specifier branch: write a
+     * [WifiConfiguration] and enable it. [WifiNetworkSpecifier] and [ConnectivityManager.requestNetwork]
+     * do not exist before API 29, so this is the only path available on those devices.
+     */
+    private suspend fun joinStripApLegacy(
+        context: Context,
+        ssid: String,
+        password: String,
+        onLost: ((fastRoamBack: Boolean) -> Unit)?,
+    ): Network? {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        val config = WifiConfiguration().apply {
+            SSID = "\"$ssid\""
+            if (password.isEmpty()) {
+                allowedKeyManagement.set(WifiConfiguration.KeyMgmt.NONE)
+            } else {
+                preSharedKey = "\"$password\""
+                allowedKeyManagement.set(WifiConfiguration.KeyMgmt.WPA_PSK)
+            }
+        }
+        // addNetwork() answers -1 once the SSID is already in the saved list, which is the normal
+        // case when a strip is re-provisioned; fall back to that entry instead of failing.
+        @Suppress("DEPRECATION")
+        val netId = wm.addNetwork(config).takeIf { it >= 0 }
+            ?: runCatching { wm.configuredNetworks }
+                .getOrNull()
+                ?.firstOrNull { it.SSID == "\"$ssid\"" }
+                ?.networkId
+            ?: return null
+        @Suppress("DEPRECATION") wm.disconnect()
+        @Suppress("DEPRECATION")
+        val enabled = wm.enableNetwork(netId, true)
+        if (!enabled) return null
+        @Suppress("DEPRECATION") wm.reconnect()
+
+        // enableNetwork() only means the request was accepted; the association lands asynchronously.
+        val deadline = System.currentTimeMillis() + LEGACY_JOIN_TIMEOUT_MS
+        while (System.currentTimeMillis() < deadline) {
+            delay(400L)
+            @Suppress("DEPRECATION")
+            val joined = wm.connectionInfo?.ssid.orEmpty().removeSurrounding("\"") == ssid
+            if (joined) {
+                val net = cm.activeNetwork ?: continue
+                Log.i("WifiHelper", "Joined $ssid through the legacy WifiConfiguration path: $net")
+                return adoptNetwork(cm, net, onLost)
+            }
+        }
+        Log.w("WifiHelper", "Legacy join to $ssid timed out")
+        return null
     }
 
     fun bindProcessToNetwork(context: Context, network: Network?) {

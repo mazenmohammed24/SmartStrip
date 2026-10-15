@@ -46,7 +46,7 @@ Usage:
 Options:
   --ip        IPv4 the strip should dial (this server's address, public or LAN)
   --ssid      home Wi-Fi name the strip should join
-  --password  home Wi-Fi password
+  --password  home Wi-Fi password (8-63 characters, or 64 hex digits)
   --host      strip setup service address (default ${MTTL_SETUP_HOST})
   --wait      seconds to wait for the setup service (default 20)
 

@@ -78,7 +78,10 @@ in the network name; no internet on that network is normal).
 
 The strip stores exactly **one** server address, so re-provision it to move it to a
 different host or network. The protocol has no escaping, so an SSID or password
-containing `:` is rejected rather than silently mangled.
+containing `:` is rejected rather than silently mangled. The home Wi-Fi password is
+also checked against the WPA2 rules before it is sent — 8-63 characters, or 64 hex
+digits — because a passphrase the strip's supplicant cannot accept otherwise shows up
+only as a strip that stops answering.
 
 Windows firewall, if the strip cannot reach the server:
 
