@@ -139,10 +139,11 @@ fun PowerkTheme(
         AppTheme.DARK -> true
         else -> isSystemInDarkTheme()
     },
+    accentHex: String = AppTheme.accentColor,
     content: @Composable () -> Unit,
 ) {
     MaterialExpressiveTheme(
-        colorScheme = powerkScheme(dark),
+        colorScheme = powerkScheme(dark, accentHex),
         motionScheme = MotionScheme.expressive(),
         shapes = PowerkShapes,
         typography = PowerkTypography,

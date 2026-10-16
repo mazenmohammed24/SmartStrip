@@ -119,31 +119,6 @@ private val TABS = listOf(
 private fun String?.tabRoute(): String? = this?.substringBefore('?')?.takeIf { r -> TABS.any { it.route == r } }
 
 @Composable
-fun PowerkApp() {
-    val vm: StripsViewModel = viewModel()
-    val focus = LocalFocusManager.current
-    var splash by remember { mutableStateOf(true) }
-    LaunchedEffect(Unit) { delay(1050); splash = false }
-    Ticker.Run()
-    LaunchedEffect(Unit) { Diag.runLoop() }
-    DisposableEffect(Unit) {
-        Diag.startFrameMonitor()
-        onDispose { Diag.stopFrameMonitor() }
-    }
-    LifecycleResumeEffect(Unit) {
-        vm.onResume()
-        onPauseOrDispose {}
-    }
-
-    Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { focus.clearFocus() } }) {
-        PowerkNavigation(vm)
-        AnimatedVisibility(splash, exit = fadeOut(tween(380, easing = FastOutSlowInEasing)) + scaleOut(tween(380, easing = FastOutSlowInEasing), targetScale = 2.4f)) {
-            Splash()
-        }
-    }
-}
-
-@Composable
 private fun Splash() {
     val primary = MaterialTheme.colorScheme.primary
     val scale = remember { Animatable(0.5f) }
@@ -154,7 +129,7 @@ private fun Splash() {
         launch { glow.animateTo(1f, tween(650, easing = FastOutSlowInEasing)) }
         launch { delay(280); text.animateTo(1f, tween(450, easing = FastOutSlowInEasing)) }
     }
-    Box(Modifier.fillMaxSize().background(Color(0xFF080B09)), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) {
         Box(
             Modifier.size(320.dp).graphicsLayer { alpha = glow.value * 0.9f; scaleX = 0.7f + glow.value * 0.3f; scaleY = 0.7f + glow.value * 0.3f }
                 .background(Brush.radialGradient(listOf(primary.copy(alpha = 0.42f), Color.Transparent))),
@@ -172,6 +147,32 @@ private fun Splash() {
         }
     }
 }
+@Composable
+fun PowerkApp() {
+    val vm: StripsViewModel = viewModel()
+    val focus = LocalFocusManager.current
+    var splash by remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) { delay(1050); splash = false }
+    Ticker.Run()
+    LaunchedEffect(Unit) { Diag.runLoop() }
+    DisposableEffect(Unit) {
+        Diag.startFrameMonitor()
+        onDispose { Diag.stopFrameMonitor() }
+    }
+    LifecycleResumeEffect(Unit) {
+        vm.onResume()
+        onPauseOrDispose {}
+    }
+    
+    Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { focus.clearFocus() } }) {
+        PowerkNavigation(vm)
+        AnimatedVisibility(splash, exit = fadeOut(tween(380, easing = FastOutSlowInEasing)) + scaleOut(tween(380, easing = FastOutSlowInEasing), targetScale = 2.4f)) {
+            Splash()
+        }
+    }
+}
+
+
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun PowerkNavigation(vm: StripsViewModel) {
@@ -180,6 +181,7 @@ private fun PowerkNavigation(vm: StripsViewModel) {
     val currentTab = entry?.destination?.route.tabRoute()
     val context = LocalContext.current
     val route = entry?.destination?.route
+    
     LaunchedEffect(route) {
         if (route == null) return@LaunchedEffect
         Diag.route = route
@@ -187,7 +189,7 @@ private fun PowerkNavigation(vm: StripsViewModel) {
         delay(1600)
         context.findActivity()?.let { Diag.captureScreen(it, route.substringBefore('/').substringBefore('?')) }
     }
-
+    
     fun goTab(route: String) {
         nav.navigate(route) {
             popUpTo(nav.graph.findStartDestination().id) { saveState = true }
@@ -195,10 +197,11 @@ private fun PowerkNavigation(vm: StripsViewModel) {
             restoreState = true
         }
     }
-
+    
     val items = TABS.map { DockItem(it.icon, it.label(), if (it.route == ACTIVITY) vm.unread else 0) }
-
-    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {        NavHost(
+    
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        NavHost(
             nav,
             startDestination = HOME,
             modifier = Modifier.fillMaxSize(),

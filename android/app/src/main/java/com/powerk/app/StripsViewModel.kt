@@ -205,6 +205,10 @@ class StripsViewModel : ViewModel() {
     fun command(mac: String, outlet: Int, on: Boolean) {
         val before = strips.firstOrNull { it.mac == mac } ?: return
         val now = System.currentTimeMillis()
+        // Flip the UI immediately; the server confirmation arrives later over the live link.
+        patch(mac) { s ->
+            s.copy(outlets = s.outlets.map { o -> if ((outlet == 0 || o.n == outlet) && o.on != on) o.copy(on = on, changedAtMs = now) else o })
+        }
         viewModelScope.launch {
             try {
                 Api.setOutlet(Server.base, Server.token, mac, outlet, on)

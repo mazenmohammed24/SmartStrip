@@ -27,7 +27,7 @@ data class Outlet(
     val energyKwh: Double,
     val tempC: Int,
     val icon: String,
-    val name: String,
+    val name: String = "",
     val changedAtMs: Long = 0L,
 )
 
@@ -44,7 +44,7 @@ data class Strip(
     val currentA: Double?,
     val rssi: Int?,
     val icon: String,
-    val location: String?,
+    val location: String? = null,
     val outlets: List<Outlet>,
 )
 
@@ -154,7 +154,7 @@ object Api {
 
     suspend fun powerSummary(base: String, token: String, stripId: String): PowerSummary = withContext(Dispatchers.IO) {
         val o = JSONObject(request("$base/api/power/summary?stripId=$stripId", null, token))
-        PowerSummary(o.optDouble("todayKwh", 0.0), o.optDouble("todayCost", 0.0), o.optString("currency", "USD"), o.optDouble("liveWatts", 0.0))
+        PowerSummary(o.optDouble("todayKwh", 0.0), o.optDouble("todayCost", 0.0), o.optString("currency", "EGP"), o.optDouble("liveWatts", 0.0))
     }
 
     suspend fun energy(base: String, token: String, stripId: String, days: Int): EnergyReport = withContext(Dispatchers.IO) {
@@ -164,7 +164,7 @@ object Api {
             totalKwh = o.optDouble("totalKwh", 0.0),
             previousKwh = o.optDouble("previousKwh", 0.0),
             cost = o.optDouble("cost", 0.0),
-            currency = o.optString("currency", "USD"),
+            currency = o.optString("currency", "EGP"),
             ratePerKwh = o.optDouble("ratePerKwh", 0.0),
             tariff = o.optJSONObject("tariff").let { t ->
                 TariffInfo(
@@ -304,6 +304,7 @@ object Api {
 
     private fun <T> org.json.JSONArray?.toList(map: (JSONObject) -> T): List<T> =
         if (this == null) emptyList() else (0 until length()).map { map(getJSONObject(it)) }
+
     /**
      * Sends Wi-Fi credentials to the strip.
      *
@@ -545,7 +546,25 @@ object Api {
         request("$base/api/strips", body, token)
     }
 
+    // Retry the same HTTP request on transient connection failures.
+    // Only idempotent requests (no body) are retried so repeated POSTs cannot double-apply commands.
     internal fun request(url: String, body: String?, token: String, method: String? = null): String {
+        val maxAttempts = if (body == null && method == null) 3 else 1
+        var attempt = 0
+        while (true) {
+            try {
+                return doRequest(url, body, token, method)
+            } catch (e: ServerException) {
+                throw e
+            } catch (e: Exception) {
+                attempt++
+                if (attempt >= maxAttempts) throw ServerException(e.message ?: "connection failed")
+                Thread.sleep(500L * (1L shl attempt.coerceAtMost(2)))
+            }
+        }
+    }
+
+    private fun doRequest(url: String, body: String?, token: String, method: String? = null): String {
         val connection = (URL(url).openConnection() as HttpURLConnection)
         try {
             connection.connectTimeout = 4000
@@ -562,10 +581,6 @@ object Api {
             val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
             if (code !in 200..299) throw ServerException(errorOf(text, code))
             return text
-        } catch (e: ServerException) {
-            throw e
-        } catch (e: Exception) {
-            throw ServerException(e.message ?: "connection failed")
         } finally {
             connection.disconnect()
         }
@@ -663,7 +678,7 @@ object Api {
     fun parseSettings(x: JSONObject) = AppSettings(
         theme = x.optString("theme", "system"),
         energyUnit = x.optString("energyUnit", "kWh"),
-        currency = x.optString("currency", "USD"),
+        currency = x.optString("currency", "EGP"),
         ratePerKwh = x.optDouble("ratePerKwh", 0.16),
         tariffMode = x.optString("tariffMode", "egypt"),
         overloadThresholdWatts = x.optInt("overloadThresholdWatts", 1800),

@@ -54,6 +54,29 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.AnimationVector1D
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.ShaderBrush
+import androidx.compose.ui.graphics.toArgb
 import com.powerk.app.Outlet
 import com.powerk.app.Strip
 import com.powerk.app.StripsViewModel
@@ -134,57 +157,119 @@ fun TilesStripCard(strip: Strip, vm: StripsViewModel, onOpen: () -> Unit, modifi
 @Composable
 private fun OutletTile(strip: Strip, o: Outlet, vm: StripsViewModel, left: Boolean, top: Boolean, notch: Boolean, modifier: Modifier, onLongPress: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
-    val bg by animateColorAsState(if (o.on) scheme.primaryContainer.copy(alpha = 0.7f) else scheme.surfaceContainer, tween(180), label = "tileBg")
-    val edge by animateColorAsState(if (o.on) scheme.primary else Color0, tween(180), label = "tileEdge")
+    val bg by animateColorAsState(if (o.on) scheme.primaryContainer.copy(alpha = 0.7f) else scheme.surfaceContainer, spring(stiffness = 300f), label = "tileBg")
+    val edge by animateColorAsState(if (o.on) scheme.primary.copy(alpha = 0.3f) else Color0, tween(260), label = "tileEdge")
+    val faceBg by animateColorAsState(if (o.on) scheme.primary.copy(alpha = 0.2f) else scheme.surface.copy(alpha = 0.85f), tween(260), label = "tileFace")
     val shape = if (notch) NotchShape(22.dp, MASTER / 2 + 6.dp, TILE_GAP, left, top) else RoundedCornerShape(22.dp)
     val timer = vm.relayTimers[timerKey(strip.mac, o.n)]
     val align = if (left) Alignment.Start else Alignment.End
     val textAlign = if (left) TextAlign.Start else TextAlign.End
+    val pop = rememberPop(o.on)
+    val orbit by animateFloatAsState(if (o.on) 1f else 0f, tween(380), label = "tileOrbit")
+    // The master button's notch eats the inner bottom corner of the top tiles, so keep the text clear of it.
+    val inset = if (notch && top) 26.dp else 0.dp
 
     Box(
-        modifier.height(116.dp).clip(shape).background(bg).border(1.5.dp, edge, shape)
-            .tap(enabled = strip.online, onLongClick = onLongPress) { vm.command(strip.mac, o.n, !o.on) }
-            .padding(12.dp),
+        modifier.height(128.dp).graphicsLayer { scaleX = pop.value; scaleY = pop.value }
+            .clip(shape).background(bg).border(1.5.dp, edge, shape)
+            .tap(enabled = strip.online, onLongClick = onLongPress) { vm.command(strip.mac, o.n, !o.on) },
     ) {
+        if (orbit > 0.01f) OrbitEdge(shape, scheme.primary, orbit, Modifier.matchParentSize())
+        Box(Modifier.matchParentSize().padding(12.dp)) {
         Row(Modifier.align(if (left) Alignment.TopStart else Alignment.TopEnd), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             val face: @Composable () -> Unit = {
-                Box(Modifier.size(34.dp).background(scheme.surface.copy(alpha = 0.85f), CircleShape), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(34.dp).background(faceBg, CircleShape), contentAlignment = Alignment.Center) {
                     if (o.icon == "plug" || o.icon.isBlank()) SocketFace(o.on, 22.dp) else Text(iconGlyph(o.icon), fontSize = 17.sp)
                 }
             }
             val marks: @Composable () -> Unit = {
-                if (o.on) Icon(Icons.Rounded.Bolt, null, Modifier.size(14.dp), tint = scheme.primary)
+                AnimatedVisibility(o.on, enter = fadeIn(tween(160)) + scaleIn(spring(0.4f, 500f), initialScale = 0.3f), exit = fadeOut(tween(100)) + scaleOut(tween(120))) {
+                    Icon(Icons.Rounded.Bolt, null, Modifier.size(14.dp), tint = scheme.primary)
+                }
                 if (timer != null) Icon(Icons.Rounded.AccessTime, "Timer active", Modifier.size(14.dp), tint = scheme.tertiary)
             }
             if (left) { face(); marks() } else { marks(); face() }
         }
-        Column(Modifier.align(if (left) Alignment.BottomStart else Alignment.BottomEnd), horizontalAlignment = align) {
+        Column(
+            Modifier.align(if (left) Alignment.BottomStart else Alignment.BottomEnd).padding(start = if (left) 0.dp else inset, end = if (left) inset else 0.dp),
+            horizontalAlignment = align,
+        ) {
             Text(o.name, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = textAlign)
-            if (o.on) {
-                Text(fmtW(o.powerW), fontFamily = Mono, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = scheme.primary, maxLines = 1, textAlign = textAlign)
-                val amps = strip.voltage?.takeIf { it > 0 }?.let { fmtNum(o.powerW / it, 2) + " A · " }.orEmpty()
-                val since = if (o.changedAtMs > 0) " · " + fmtDuration(Ticker.now - o.changedAtMs) else ""
-                Text(timer?.let { "⏱ " + TimerCountdown(it.restoreAtMs) } ?: "$amps${o.tempC}°C$since", fontFamily = Mono, fontSize = 10.sp, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = textAlign)
-            } else {
+            AnimatedVisibility(o.on, enter = fadeIn(tween(220)) + expandVertically(spring(0.8f, 400f)), exit = fadeOut(tween(100)) + shrinkVertically(tween(160))) {
+                Column(horizontalAlignment = align) {
+                    val since = if (o.changedAtMs > 0) fmtDuration(Ticker.now - o.changedAtMs) else ""
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text(fmtW(o.powerW), fontFamily = Mono, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = scheme.primary, maxLines = 1)
+                        if (since.isNotEmpty()) Text(" · $since", fontFamily = Mono, fontSize = 10.sp, color = scheme.onSurfaceVariant, maxLines = 1, modifier = Modifier.padding(bottom = 1.dp))
+                    }
+                    val amps = strip.voltage?.takeIf { it > 0 }?.let { fmtNum(o.powerW / it, 2) + " A · " }.orEmpty()
+                    Text(timer?.let { "⏱ " + TimerCountdown(it.restoreAtMs) } ?: "$amps${o.tempC}°C", fontFamily = Mono, fontSize = 10.sp, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = textAlign)
+                }
+            }
+            AnimatedVisibility(!o.on, enter = fadeIn(tween(220)) + expandVertically(), exit = fadeOut(tween(100)) + shrinkVertically(tween(140))) {
                 Text("OFF", fontFamily = Mono, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = scheme.onSurfaceVariant, textAlign = textAlign)
             }
+        }
         }
     }
 }
 
-private val Color0 = androidx.compose.ui.graphics.Color.Transparent
+private val Color0 = Color.Transparent
+
+/** Springy squash-and-release that plays whenever [on] flips (not on first composition). */
+@Composable
+private fun rememberPop(on: Boolean): Animatable<Float, AnimationVector1D> {
+    val pop = remember { Animatable(1f) }
+    var seen by remember { mutableStateOf(on) }
+    LaunchedEffect(on) {
+        if (on != seen) {
+            seen = on
+            pop.snapTo(0.93f)
+            pop.animateTo(1f, spring(0.38f, 380f))
+        }
+    }
+    return pop
+}
+
+/** Two soft highlights that circle the outline of [shape]. Only draws; never recomposes while spinning. */
+@Composable
+private fun OrbitEdge(shape: Shape, color: Color, alpha: Float, modifier: Modifier) {
+    val angle by rememberInfiniteTransition(label = "orbit").animateFloat(
+        0f, 360f, infiniteRepeatable(tween(3000, easing = LinearEasing)), label = "orbitAngle",
+    )
+    Box(
+        modifier.drawWithCache {
+            val outline = shape.createOutline(size, layoutDirection, this)
+            val bright = color.toArgb()
+            val clear = color.copy(alpha = 0f).toArgb()
+            val stroke = Stroke(6.dp.toPx())
+            val matrix = android.graphics.Matrix()
+            onDrawBehind {
+                matrix.setRotate(angle, size.width / 2f, size.height / 2f)
+                val brush = object : ShaderBrush() {
+                    override fun createShader(size: Size): android.graphics.Shader =
+                        android.graphics.SweepGradient(size.width / 2f, size.height / 2f, intArrayOf(clear, bright, clear, bright, clear), floatArrayOf(0f, 0.25f, 0.5f, 0.75f, 1f))
+                            .also { it.setLocalMatrix(matrix) }
+                }
+                drawOutline(outline, brush, alpha, stroke)
+            }
+        },
+    )
+}
 
 @Composable
 private fun TilesMaster(strip: Strip, anyOn: Boolean, onClick: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
-    val fg by animateColorAsState(if (anyOn) scheme.onPrimary else scheme.onSurfaceVariant, tween(180), label = "mFg")
-    val bg by animateColorAsState(if (anyOn) scheme.primary else scheme.surfaceContainerHigh, tween(180), label = "mBg")
-    val dots = strip.outlets.take(4).map { it.on }
+    val fg by animateColorAsState(if (anyOn) scheme.onPrimary else scheme.onSurfaceVariant, tween(220), label = "mFg")
+    val bg by animateColorAsState(if (anyOn) scheme.primary else scheme.surfaceContainerHigh, tween(220), label = "mBg")
+    val pop = rememberPop(anyOn)
+    val orbit by animateFloatAsState(if (anyOn) 1f else 0f, tween(380), label = "mOrbit")
     val dotOn = scheme.primary
     val dotOff = scheme.outline.copy(alpha = 0.45f)
+    val dots = (0 until 4).map { i -> animateColorAsState(if (strip.outlets.getOrNull(i)?.on == true) dotOn else dotOff, tween(220), label = "mDot$i").value }
     Surface(
         shape = CircleShape, color = scheme.surface, border = BorderStroke(1.dp, scheme.outlineVariant), shadowElevation = 6.dp,
-        modifier = Modifier.size(MASTER).tap(enabled = strip.online, onClick = onClick),
+        modifier = Modifier.size(MASTER).graphicsLayer { scaleX = pop.value; scaleY = pop.value }.tap(enabled = strip.online, onClick = onClick),
     ) {
         Box(Modifier.padding(7.dp), contentAlignment = Alignment.Center) {
             Box(Modifier.fillMaxSize().clip(CircleShape).background(bg), contentAlignment = Alignment.Center) {
@@ -194,8 +279,9 @@ private fun TilesMaster(strip: Strip, anyOn: Boolean, onClick: () -> Unit) {
                 val r = 2.5.dp.toPx()
                 val inset = 3.dp.toPx()
                 val pts = listOf(Offset(inset, inset), Offset(size.width - inset, inset), Offset(inset, size.height - inset), Offset(size.width - inset, size.height - inset))
-                pts.forEachIndexed { i, p -> drawCircle(if (dots.getOrElse(i) { false }) dotOn else dotOff, r, p) }
+                pts.forEachIndexed { i, pt -> drawCircle(dots[i], r, pt) }
             }
         }
+        if (orbit > 0.01f) OrbitEdge(CircleShape, scheme.primary, orbit, Modifier.fillMaxSize())
     }
 }

@@ -14,14 +14,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import java.util.Locale
 
-private const val DEFAULT_SERVER_URL = "https://notes-thinking-amendment-charitable.trycloudflare.com"
-
 /** Server URL (full https/http URL to the SmartStrip server), persisted in SharedPreferences. */
 object Server {
     private var prefs: SharedPreferences? = null
 
     /** Full base URL, e.g. https://xyz.trycloudflare.com or http://192.168.1.10:4001 */
-    var serverUrl by mutableStateOf(DEFAULT_SERVER_URL)
+    var serverUrl by mutableStateOf("https://notes-thinking-amendment-charitable.trycloudflare.com")
         private set
     var token by mutableStateOf("")
         private set
@@ -39,7 +37,7 @@ object Server {
         serverUrl = when {
             storedUrl.isNotBlank() -> storedUrl
             legacyHost.isNotBlank() -> "http://$legacyHost:$legacyPort"
-            else -> DEFAULT_SERVER_URL
+            else -> "https://notes-thinking-amendment-charitable.trycloudflare.com"
         }
         token = p.getString("token", "").orEmpty()
     }
@@ -56,7 +54,6 @@ object Server {
     val configured: Boolean get() = serverUrl.isNotBlank()
     val base: String get() = serverUrl
 }
-
 
 /** Local app appearance. This is kept on-device so the Android app can switch instantly. */
 object AppTheme {

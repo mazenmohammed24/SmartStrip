@@ -1,5 +1,6 @@
 package com.powerk.app.screens
 
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
@@ -32,14 +33,21 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,6 +58,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -63,6 +72,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.content.Context
+import android.content.SharedPreferences
 import com.powerk.app.Api
 import com.powerk.app.AppSettings
 import com.powerk.app.AppTheme
@@ -82,8 +93,11 @@ import com.powerk.app.components.rememberDismissKeyboard
 import com.powerk.app.components.tap
 import kotlinx.coroutines.launch
 
+
+
+
 private val ACCENTS = listOf("#0f766e", "#16803c", "#176f91", "#7c3aed", "#c2410c", "#be123c")
-private val HEX = Regex("^#[0-9a-fA-F]{6}$")
+
 
 @Composable
 private fun Group(title: String, content: @Composable () -> Unit) {
@@ -174,7 +188,7 @@ fun SettingsScreen(vm: StripsViewModel, onNavigate: (String) -> Unit) {
     fun update(next: (AppSettings) -> AppSettings) { settings?.let { vm.saveSettings(next(it)) } }
     fun commit() { Server.save(serverUrl, token); vm.restart() }
 
-    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).imePadding()) {
+    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).imePadding().navigationBarsPadding().padding(bottom = 16.dp)) {
         ScreenHeader(stringResource(R.string.settings_title), eyebrow = "Preferences")
         Column(Modifier.padding(horizontal = 14.dp).padding(bottom = 104.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Group(stringResource(R.string.theme_title)) {
@@ -210,11 +224,23 @@ fun SettingsScreen(vm: StripsViewModel, onNavigate: (String) -> Unit) {
                     }
                 }
                 Divider()
-                Row2(stringResource(R.string.theme_custom_color)) {
-                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                        NumField(AppTheme.accentColor, null, KeyboardType.Ascii, 76) { v ->
-                            if (HEX.matches(v)) { AppTheme.setAccent(v); update { s -> s.copy(accentColor = v) } }
-                        }
+                Row2(stringResource(R.string.theme_custom_color), "Pick any color") {
+                    var showPicker by remember { mutableStateOf(false) }
+                    val colorPreview = remember(AppTheme.accentColor) {
+                        Color(0xFF000000 or (AppTheme.accentColor.removePrefix("#").toLongOrNull(16) ?: 0x1AA34A))
+                    }
+                    Box(
+                        Modifier.size(30.dp).background(colorPreview, CircleShape)
+                            .border(2.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
+                            .tap { showPicker = true },
+                    )
+                    Text(AppTheme.accentColor, fontSize = 12.sp, fontFamily = Mono, color = scheme.onSurfaceVariant)
+                    if (showPicker) {
+                        ColorPickerDialog(
+                            initialHex = AppTheme.accentColor,
+                            onDismiss = { showPicker = false },
+                            onPick = { hex -> AppTheme.setAccent(hex); update { s -> s.copy(accentColor = hex) }; showPicker = false },
+                        )
                     }
                 }
             }
@@ -296,16 +322,8 @@ fun SettingsScreen(vm: StripsViewModel, onNavigate: (String) -> Unit) {
             }
 
             Group("Diagnostics") {
-                Row2("Send logs and crashes", "Helps find and fix problems from the server") {
-                    Switch(Diag.enabled, { Diag.toggleEnabled(it) })
-                }
-                Divider()
-                Row2("Send screenshots", "Of this app only, never the Settings screen") {
-                    Switch(Diag.screenshots, { Diag.toggleScreenshots(it) }, enabled = Diag.enabled)
-                }
-                Divider()
-                Row2("Send now", Diag.status ?: "Uploads queued logs now") {
-                    FilledTonalButton({ Diag.sendNow() }, enabled = Diag.enabled) { Text("Send", fontSize = 13.sp) }
+                Row2("Screenshots", "Attach screen captures to diagnostics sent to your server") {
+                    Switch(Diag.screenshots, { Diag.toggleScreenshots(it) })
                 }
             }
 
