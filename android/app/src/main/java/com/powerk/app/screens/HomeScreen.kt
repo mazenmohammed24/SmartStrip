@@ -1,5 +1,48 @@
 package com.powerk.app.screens
 
+import com.powerk.app.components.TilesStripCard
+
+import androidx.compose.ui.platform.LocalContext
+
+import androidx.compose.ui.draw.clip
+
+import androidx.compose.material.icons.rounded.ViewAgenda
+
+import androidx.compose.material.icons.rounded.Dashboard
+
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyItemScope
+
+import androidx.compose.foundation.layout.offset
+
+import android.content.Context
+
+import androidx.compose.animation.togetherWith
+
+import androidx.compose.animation.slideOutHorizontally
+
+import androidx.compose.animation.slideInHorizontally
+
+import androidx.compose.animation.scaleOut
+
+import androidx.compose.animation.scaleIn
+
+import androidx.compose.animation.fadeOut
+
+import androidx.compose.animation.fadeIn
+
+import androidx.compose.animation.core.spring
+
+import androidx.compose.animation.core.animateDpAsState
+
+import androidx.compose.animation.core.FastOutSlowInEasing
+
+import androidx.compose.animation.animateColorAsState
+
+import androidx.compose.animation.AnimatedVisibility
+
+import androidx.compose.animation.AnimatedContent
+
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -95,14 +138,14 @@ fun HomeScreen(
     onOpenStrip: (String) -> Unit,
     onTab: (String) -> Unit,
 ) {
-    val strips = vm.strips
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("powerk", Context.MODE_PRIVATE) }
+    var tiles by rememberSaveable { mutableStateOf(prefs.getBoolean("home_tiles", false)) }
     var query by rememberSaveable { mutableStateOf("") }
     var gridView by rememberSaveable { mutableStateOf(true) }
     var showAdd by rememberSaveable { mutableStateOf(false) }
-    val state = rememberLazyListState()
     val dismiss = rememberDismissKeyboard()
-    LaunchedEffect(state.isScrollInProgress) { if (state.isScrollInProgress) dismiss() }
-
+    val strips = vm.strips
     val visible by remember(strips, query) {
         derivedStateOf {
             val q = query.trim().lowercase()
@@ -112,70 +155,132 @@ fun HomeScreen(
         }
     }
 
-    LazyColumn(
-        state = state,
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 14.dp, end = 14.dp, bottom = 100.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        item(key = "header") {
-            Row(Modifier.fillMaxWidth().statusBarsPadding().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize()) {
+            Row(Modifier.fillMaxWidth().statusBarsPadding().padding(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     SectionLabel("Control center")
                     Text("My strips", fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                     Text(Server.host, fontFamily = Mono, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                HeaderButton(Icons.Rounded.Refresh, "Refresh") { vm.refresh() }
+                LayoutToggle(tiles) { tiles = it; prefs.edit().putBoolean("home_tiles", it).apply() }
                 Spacer(Modifier.width(8.dp))
-                HeaderButton(Icons.Rounded.Add, "Add strip", primary = true) { showAdd = true }
-            }
-        }
-        item(key = "total") { TotalCard(vm, strips, vm.link) }
-        item(key = "links") {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                QuickLink(Icons.Rounded.BarChart, "Usage", Modifier.weight(1f)) { onTab("energy") }
-                QuickLink(Icons.Rounded.AccessTime, "Timers", Modifier.weight(1f)) { onTab("automations") }
-                QuickLink(Icons.Rounded.AutoMode, "Rules", Modifier.weight(1f)) { onTab("rules") }
-                QuickLink(Icons.Rounded.MeetingRoom, "Rooms", Modifier.weight(1f)) { onTab("rooms") }
-            }
-        }
-        if (strips.size > 1 || query.isNotEmpty()) {
-            item(key = "search") {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SearchField(query, { query = it }, dismiss, Modifier.weight(1f))
-                    ViewToggle(gridView) { gridView = it }
+                HeaderButton(Icons.Rounded.Refresh, "Refresh") { vm.refresh() }
+                if (!tiles) {
+                    Spacer(Modifier.width(8.dp))
+                    HeaderButton(Icons.Rounded.Add, "Add strip", primary = true) { showAdd = true }
                 }
             }
-        }
-        when {
-            !vm.loaded && vm.link != Link.OFFLINE -> {
-                items(2, key = { "sk$it" }) { Shimmer(Modifier.fillMaxWidth().height(200.dp)) }
-            }
-            !vm.loaded -> item(key = "offline") {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    MessageCard("Can't reach ${Server.host}. Retrying automatically.", true, Icons.Rounded.Warning)
-                    Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.fillMaxWidth().tap { vm.restart() }) {
-                        Text("Retry now", Modifier.padding(12.dp), fontSize = 14.sp, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.SemiBold)
+            AnimatedContent(
+                targetState = tiles,
+                modifier = Modifier.weight(1f),
+                transitionSpec = {
+                    val dir = if (targetState) 1 else -1
+                    (fadeIn(tween(260, delayMillis = 60)) + scaleIn(tween(300, easing = FastOutSlowInEasing), initialScale = 0.94f) + slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 10 * dir })
+                        .togetherWith(fadeOut(tween(140)) + scaleOut(tween(220), targetScale = 0.96f) + slideOutHorizontally(tween(220)) { -it / 12 * dir })
+                },
+                label = "homeLayout",
+            ) { isTiles ->
+                val state = rememberLazyListState()
+                LaunchedEffect(state.isScrollInProgress) { if (state.isScrollInProgress) dismiss() }
+                LazyColumn(
+                    state = state,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 14.dp, end = 14.dp, bottom = if (isTiles) 168.dp else 100.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    if (!isTiles) {
+                        item(key = "total") { TotalCard(vm, strips, vm.link) }
+                        item(key = "links") {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                QuickLink(Icons.Rounded.BarChart, "Usage", Modifier.weight(1f)) { onTab("energy") }
+                                QuickLink(Icons.Rounded.AccessTime, "Timers", Modifier.weight(1f)) { onTab("automations") }
+                                QuickLink(Icons.Rounded.AutoMode, "Rules", Modifier.weight(1f)) { onTab("rules") }
+                                QuickLink(Icons.Rounded.MeetingRoom, "Rooms", Modifier.weight(1f)) { onTab("rooms") }
+                            }
+                        }
+                    }
+                    if (strips.size > 1 || query.isNotEmpty()) {
+                        item(key = "search") {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                SearchField(query, { query = it }, dismiss, Modifier.weight(1f))
+                                if (!isTiles) ViewToggle(gridView) { gridView = it }
+                            }
+                        }
+                    }
+                    stripBody(vm, strips, visible, query, { showAdd = true }) { strip ->
+                        Box(Modifier.animateItem()) {
+                            when {
+                                isTiles -> TilesStripCard(strip, vm, { onOpenStrip(strip.mac) })
+                                gridView -> StripCard(strip, vm, { onOpenStrip(strip.mac) })
+                                else -> StripRow(strip, vm, { onOpenStrip(strip.mac) })
+                            }
+                        }
                     }
                 }
             }
-            strips.isEmpty() -> item(key = "empty") {
-                EmptyState("No strips yet", "Add a strip and it shows up here instantly.", "Add strip") { showAdd = true }
-            }
-            visible.isEmpty() -> item(key = "nomatch") {
-                EmptyState("No match", "Nothing matches \"$query\".")
-            }
-            else -> items(visible, key = { it.mac }) { strip ->
-                Box(Modifier.animateItem()) {
-                    if (gridView) StripCard(strip, vm, { onOpenStrip(strip.mac) })
-                    else StripRow(strip, vm, { onOpenStrip(strip.mac) })
-                }
-            }
+        }
+        AnimatedVisibility(
+            tiles,
+            Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 96.dp),
+            enter = fadeIn(tween(200)) + scaleIn(spring(0.6f, 500f), initialScale = 0.6f),
+            exit = fadeOut(tween(120)) + scaleOut(tween(140), targetScale = 0.7f),
+        ) {
+            ExtendedFloatingActionButton(
+                onClick = { showAdd = true },
+                icon = { Icon(Icons.Rounded.Add, null) },
+                text = { Text("Add strip", fontWeight = FontWeight.Bold) },
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+            )
         }
     }
     if (showAdd) AddStripSheet(vm) { showAdd = false }
 }
 
+private fun LazyListScope.stripBody(
+    vm: StripsViewModel,
+    strips: List<Strip>,
+    visible: List<Strip>,
+    query: String,
+    onAdd: () -> Unit,
+    card: @Composable LazyItemScope.(Strip) -> Unit,
+) {
+    when {
+        !vm.loaded && vm.link != Link.OFFLINE -> items(2, key = { "sk$it" }) { Shimmer(Modifier.fillMaxWidth().height(200.dp)) }
+        !vm.loaded -> item(key = "offline") {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                MessageCard("Can't reach ${Server.host}. Retrying automatically.", true, Icons.Rounded.Warning)
+                Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.fillMaxWidth().tap { vm.restart() }) {
+                    Text("Retry now", Modifier.padding(12.dp), fontSize = 14.sp, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+        strips.isEmpty() -> item(key = "empty") { EmptyState("No strips yet", "Add a strip and it shows up here instantly.", "Add strip", onAdd) }
+        visible.isEmpty() -> item(key = "nomatch") { EmptyState("No match", "Nothing matches \"$query\".") }
+        else -> items(visible, key = { it.mac }) { strip -> this.card(strip) }
+    }
+}
+
+@Composable
+private fun LayoutToggle(tiles: Boolean, onChange: (Boolean) -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    val slot = 36.dp
+    val x by animateDpAsState(if (tiles) slot else 0.dp, spring(0.7f, 700f), label = "toggleX")
+    Surface(shape = CircleShape, color = scheme.surface, border = BorderStroke(1.dp, scheme.outlineVariant)) {
+        Box(Modifier.padding(2.dp)) {
+            Box(Modifier.offset(x = x).size(slot, 34.dp).background(scheme.primary, CircleShape))
+            Row {
+                listOf(false to Icons.Rounded.Dashboard, true to Icons.Rounded.GridView).forEach { (mode, icon) ->
+                    val tint by animateColorAsState(if (tiles == mode) scheme.onPrimary else scheme.onSurfaceVariant, tween(160), label = "toggleTint")
+                    Box(Modifier.size(slot, 34.dp).clip(CircleShape).tap { if (tiles != mode) onChange(mode) }, contentAlignment = Alignment.Center) {
+                        Icon(icon, if (mode) "Tiles layout" else "Compact layout", Modifier.size(18.dp), tint = tint)
+                    }
+                }
+            }
+        }
+    }
+}
 @Composable
 private fun HeaderButton(icon: ImageVector, label: String, primary: Boolean = false, onClick: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
@@ -286,7 +391,7 @@ private fun ViewToggle(grid: Boolean, onChange: (Boolean) -> Unit) {
         modifier = Modifier.tap { onChange(!grid) },
     ) {
         Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
-            Icon(if (grid) Icons.Rounded.ViewList else Icons.Rounded.GridView, "Switch layout", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Icon(if (grid) Icons.Rounded.ViewList else Icons.Rounded.ViewAgenda, "Switch layout", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

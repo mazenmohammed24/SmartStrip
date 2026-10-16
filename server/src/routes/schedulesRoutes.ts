@@ -1,4 +1,4 @@
-﻿import { Router } from 'express';
+import { Router } from 'express';
 import { z } from 'zod';
 import * as scheduleService from '../services/scheduleService.js';
 import { fireSchedule } from '../scheduler/scheduleRunner.js';
@@ -10,13 +10,24 @@ schedulesRoutes.get('/', (_req, res) => {
   res.json({ schedules: scheduleService.listSchedules() });
 });
 
+function validZone(zone: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: zone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const scheduleSchema = z.object({
-  name: z.string().min(1).max(64),
+  name: z.string().max(64).optional(),
   stripId: z.string().min(1),
   relayIndex: z.number().int().min(0).max(7).nullable(),
   action: z.enum(['on', 'off']),
   time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'time must be HH:MM (24h)'),
   daysOfWeek: z.array(z.number().int().min(0).max(6)).min(1),
+  timezone: z.string().refine(validZone, 'unknown time zone').optional(),
+  repeat: z.enum(['weekly', 'once']).optional(),
   enabled: z.boolean().optional(),
 });
 

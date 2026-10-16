@@ -70,6 +70,8 @@ data class ScheduleItem(
     val time: String,
     val daysOfWeek: List<Int>,
     val enabled: Boolean,
+    val timezone: String = "Africa/Cairo",
+    val repeat: String = "weekly",
 )
 data class AppSettings(
     val theme: String,
@@ -216,6 +218,8 @@ object Api {
             .put("time", schedule.time)
             .put("daysOfWeek", org.json.JSONArray(schedule.daysOfWeek))
             .put("enabled", schedule.enabled)
+            .put("timezone", schedule.timezone)
+            .put("repeat", schedule.repeat)
             .toString()
         val isNew = schedule.id.isBlank()
         val url = if (isNew) "$base/api/schedules" else "$base/api/schedules/${schedule.id}"
@@ -649,6 +653,8 @@ object Api {
             time = x.optString("time", "18:00"),
             daysOfWeek = (0 until (days?.length() ?: 0)).map { days!!.optInt(it) },
             enabled = x.optBoolean("enabled", true),
+            timezone = x.optString("timezone", "Africa/Cairo").ifBlank { "Africa/Cairo" },
+            repeat = x.optString("repeat", "weekly"),
         )
     }
 

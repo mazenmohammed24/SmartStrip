@@ -176,6 +176,8 @@ export interface ScheduleDTO {
   action: RelayStateValue;
   time: string; // "HH:MM" 24h
   daysOfWeek: number[]; // 0=Sun .. 6=Sat
+  timezone: string; // IANA zone the time is read in
+  repeat: 'weekly' | 'once';
   enabled: boolean;
   lastFiredAt: string | null;
   createdAt: string;

@@ -84,6 +84,7 @@ import com.powerk.app.screens.AutomationHubScreen
 import com.powerk.app.screens.AutomationsScreen
 import com.powerk.app.screens.RoomsScreen
 import com.powerk.app.screens.RuleTypeScreen
+import com.powerk.app.screens.SchedulesScreen
 import com.powerk.app.screens.StripMenuScreen
 import com.powerk.app.screens.EnergyScreen
 import com.powerk.app.screens.HomeScreen
@@ -99,6 +100,7 @@ private const val ACTIVITY = "activity"
 private const val SETTINGS = "settings"
 private const val STRIP = "strip/{mac}"
 private const val MENU = "menu/{mac}"
+private const val SCHEDULES = "schedules/{mac}"
 private const val RULES = "rules"
 private const val ROOMS = "rooms"
 private const val RULE_TYPE = "rule/{type}/{mac}"
@@ -224,12 +226,15 @@ private fun PowerkNavigation(vm: StripsViewModel) {
                     vm, mac,
                     onBack = { nav.popBackStack() },
                     onEnergy = { nav.navigate("energy?strip=${Uri.encode(mac)}") { launchSingleTop = true } },
-                    onSchedules = { goTab(AUTOMATIONS) },
+                    onSchedules = { nav.navigate("schedules/${Uri.encode(mac)}") },
                 )
             }
             composable(MENU, arguments = listOf(navArgument("mac") { type = NavType.StringType })) {
                 val mac = it.arguments?.getString("mac").orEmpty()
-                StripMenuScreen(vm, mac, onBack = { nav.popBackStack() }, onOpen = { r -> if (r == AUTOMATIONS) goTab(AUTOMATIONS) else nav.navigate(r) })
+                StripMenuScreen(vm, mac, onBack = { nav.popBackStack() }, onOpen = { r -> nav.navigate(r) })
+            }
+            composable(SCHEDULES, arguments = listOf(navArgument("mac") { type = NavType.StringType })) {
+                SchedulesScreen(vm, it.arguments?.getString("mac").orEmpty(), onBack = { nav.popBackStack() })
             }
             composable(RULES) { AutomationHubScreen(vm, onBack = { nav.popBackStack() }, onOpen = { nav.navigate(it) }) }
             composable(ROOMS) { RoomsScreen(vm, onBack = { nav.popBackStack() }) }

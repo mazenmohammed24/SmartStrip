@@ -63,6 +63,8 @@ import com.powerk.app.RuleItem
 import com.powerk.app.Strip
 import com.powerk.app.StripsViewModel
 import com.powerk.app.components.ConfirmDialog
+import com.powerk.app.components.DayChips
+import com.powerk.app.components.FormLabel
 import com.powerk.app.components.EmptyState
 import com.powerk.app.components.IconBox
 import com.powerk.app.components.Mono
@@ -85,31 +87,31 @@ data class RuleKind(val type: String, val title: String, val blurb: String, val 
 val RULE_KINDS = listOf(
     RuleKind("smart-timer", "Smart timer", "Paint the hours an outlet should be ON", Icons.Rounded.Schedule, "Add smart timer"),
     RuleKind("auto-timer", "Auto-timers", "Return outlets to a home state after a set time", Icons.Rounded.HourglassBottom, "Add auto-timer"),
-    RuleKind("power-automation", "Power automations", "React to what an outlet is drawing", Icons.Rounded.Bolt, "Add power automation"),
-    RuleKind("voltage-protection", "Voltage protection", "Switch outlets off when the mains voltage goes out of range", Icons.Rounded.ElectricalServices, "Add voltage protection"),
-    RuleKind("current-protection", "Current protection", "Switch outlets off when they draw too many amps", Icons.Rounded.Speed, "Add current protection"),
+    RuleKind("power-automation", "Power automations", "React to what an outlet is drawing", Icons.Rounded.Bolt, "Add automation"),
+    RuleKind("voltage-protection", "Voltage protection", "Switch outlets off when the mains voltage goes out of range", Icons.Rounded.ElectricalServices, "Add protection"),
+    RuleKind("current-protection", "Current protection", "Switch outlets off when they draw too many amps", Icons.Rounded.Speed, "Add limit"),
 )
 
-private fun kindOf(type: String) = RULE_KINDS.first { it.type == type }
+internal fun kindOf(type: String) = RULE_KINDS.first { it.type == type }
 
 private val ACTIONS = listOf("notify" to "Notify only", "off" to "Switch off", "both" to "Notify and switch off")
 
-private fun JSONObject.with(key: String, value: Any): JSONObject = JSONObject(toString()).put(key, value)
+internal fun JSONObject.with(key: String, value: Any): JSONObject = JSONObject(toString()).put(key, value)
 
-private fun JSONArray?.ints(): List<Int> = if (this == null) emptyList() else (0 until length()).map { getInt(it) }
+internal fun JSONArray?.ints(): List<Int> = if (this == null) emptyList() else (0 until length()).map { getInt(it) }
 
-private fun defaultParams(type: String, strip: Strip): JSONObject = when (type) {
+internal fun defaultParams(type: String, strip: Strip): JSONObject = when (type) {
     "smart-timer" -> JSONObject().put("slots", "0".repeat(96)).put("days", JSONArray((0..6).toList()))
     "auto-timer" -> JSONObject().put("homeState", "off").put("returnAfterMin", 30).put("repeat", true)
-    "power-automation" -> JSONObject().put("direction", "below").put("thresholdW", 5).put("holdMin", 5).put("action", "both")
+    "power-automation" -> JSONObject().put("direction", "below").put("thresholdW", 5).put("holdMin", 10).put("action", "both")
     "voltage-protection" -> JSONObject()
         .put("lowEnabled", true).put("lowV", 190).put("highEnabled", true).put("highV", 250)
-        .put("holdSec", 10).put("action", "both").put("restoreAfterMin", 5)
+        .put("holdSec", 60).put("action", "both").put("restoreAfterMin", 5)
         .put("outlets", JSONArray(strip.outlets.map { it.n - 1 }))
-    else -> JSONObject().put("scope", "strip").put("limitA", 10).put("holdSec", 5).put("action", "both")
+    else -> JSONObject().put("scope", "strip").put("limitA", 10).put("holdSec", 60).put("action", "both")
 }
 
-private fun duration(min: Int): String {
+internal fun duration(min: Int): String {
     val d = min / 1440
     val h = (min % 1440) / 60
     val m = min % 60
@@ -119,38 +121,8 @@ private fun duration(min: Int): String {
 
 private fun slotTime(slot: Int) = "%02d:%02d".format((slot / 4) % 24, (slot % 4) * 15)
 
-private fun outletLabel(strip: Strip?, index: Int?): String =
+internal fun outletLabel(strip: Strip?, index: Int?): String =
     if (index == null) "Whole strip" else strip?.outlets?.firstOrNull { it.n - 1 == index }?.name?.ifBlank { null } ?: "Outlet ${index + 1}"
-
-private fun summarize(rule: RuleItem, strip: Strip?): String {
-    val p = rule.params
-    val target = outletLabel(strip, rule.relayIndex)
-    val action = ACTIONS.firstOrNull { it.first == p.optString("action") }?.second.orEmpty()
-    return when (rule.type) {
-        "smart-timer" -> {
-            val slots = p.optString("slots")
-            val ranges = mutableListOf<Pair<Int, Int>>()
-            var start = -1
-            for (i in 0..96) {
-                val on = i < 96 && slots.getOrNull(i) == '1'
-                if (on && start < 0) start = i
-                if (!on && start >= 0) { ranges += start to i; start = -1 }
-            }
-            val text = if (ranges.isEmpty()) "No hours set" else ranges.take(2).joinToString(", ") { "${slotTime(it.first)}–${slotTime(it.second)}" } + if (ranges.size > 2) " +${ranges.size - 2}" else ""
-            "$target · $text"
-        }
-        "auto-timer" -> "$target · back ${p.optString("homeState").uppercase()} after ${duration(p.optInt("returnAfterMin"))}" + if (p.optBoolean("repeat", true)) "" else " · once"
-        "power-automation" -> "$target · ${p.optString("direction")} ${p.optDouble("thresholdW").toInt()} W for ${p.optInt("holdMin")} min · $action"
-        "voltage-protection" -> {
-            val range = listOfNotNull(
-                if (p.optBoolean("lowEnabled")) "< ${p.optInt("lowV")} V" else null,
-                if (p.optBoolean("highEnabled")) "> ${p.optInt("highV")} V" else null,
-            ).joinToString(" or ").ifEmpty { "no limits" }
-            "$range for ${p.optInt("holdSec")}s · $action"
-        }
-        else -> "$target · over ${p.optDouble("limitA")} A for ${p.optInt("holdSec")}s · $action"
-    }
-}
 
 @Composable
 fun MenuCard(icon: ImageVector, title: String, desc: String, badge: String? = null, onClick: () -> Unit) {
@@ -205,7 +177,7 @@ fun StripMenuScreen(vm: StripsViewModel, mac: String, onBack: () -> Unit, onOpen
         ScreenHeader(strip?.name ?: "Strip", "Strip settings & tools", onBack = onBack)
         Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(bottom = 24.dp)) {
             SectionLabel("Automation", Modifier.padding(top = 8.dp), MaterialTheme.colorScheme.onSurfaceVariant)
-            MenuCard(Icons.Rounded.Schedule, "Schedules", "Turn outlets on or off on a timetable") { onOpen("automations") }
+            MenuCard(Icons.Rounded.Schedule, "Schedules", "Turn outlets on or off on a timetable") { onOpen("schedules/$enc") }
             RULE_KINDS.forEach { k ->
                 val n = vm.rules.count { it.stripId == mac && it.type == k.type }
                 MenuCard(k.icon, k.title, k.blurb, n.takeIf { it > 0 }?.toString()) { onOpen("rule/${k.type}/$enc") }
@@ -287,209 +259,10 @@ fun RoomsScreen(vm: StripsViewModel, onBack: () -> Unit) {
     moving?.let { RoomDialog(vm, it) { moving = null } }
 }
 
-@Composable
-fun RuleTypeScreen(vm: StripsViewModel, mac: String, type: String, onBack: () -> Unit) {
-    val strip = vm.strips.firstOrNull { it.mac == mac }
-    val kind = kindOf(type)
-    val rules = vm.rules.filter { it.stripId == mac && it.type == type }
-    var editing by remember { mutableStateOf<RuleItem?>(null) }
-    var removing by remember { mutableStateOf<RuleItem?>(null) }
-    if (strip == null) {
-        Column(Modifier.fillMaxSize().padding(16.dp)) { ScreenHeader(kind.title, onBack = onBack) }
-        return
-    }
-    val edit = editing
-    if (edit != null) {
-        BackHandler { editing = null }
-        RuleEditor(vm, strip, type, edit, rules, onClose = { editing = null })
-        return
-    }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
-        ScreenHeader(strip.name, kind.blurb, onBack = onBack, eyebrow = kind.title)
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(bottom = 24.dp)) {
-            if (rules.isEmpty()) EmptyState("Nothing here yet", kind.blurb)
-            rules.forEach { r ->
-                VCard(onClick = { editing = r }, padding = 14.dp) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconBox(size = 40.dp) { Icon(kind.icon, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary) }
-                        Spacer(Modifier.size(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(summarize(r, strip), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                            if (r.enabled && r.status != null && r.status != "idle") {
-                                Pill(r.status.uppercase(), if (r.status == "tripped") Tone.BAD else Tone.GOOD, Modifier.padding(top = 4.dp))
-                            }
-                        }
-                        Switch(checked = r.enabled, onCheckedChange = { vm.toggleRule(r) })
-                        IconButton(onClick = { removing = r }) { Icon(Icons.Rounded.Delete, "Delete", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    }
-                }
-            }
-            PrimaryButton(kind.addLabel) { editing = RuleItem("", type, mac, null, "", true, JSONObject()) }
-        }
-    }
-    removing?.let { r ->
-        ConfirmDialog("Delete rule?", summarize(r, strip), "Delete", { vm.deleteRule(r.id) }, { removing = null })
-    }
-}
-
-@Composable
-private fun PrimaryButton(text: String, enabled: Boolean = true, onClick: () -> Unit) {
-    Surface(
-        shape = RoundedCornerShape(18.dp),
-        color = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
-        modifier = Modifier.fillMaxWidth().height(56.dp).tap(enabled = enabled, onClick = onClick),
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            Text(text, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = if (enabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
-@Composable
-private fun NumField(label: String, value: Double, suffix: String, onValue: (Double) -> Unit) {
-    var text by remember { mutableStateOf(if (value % 1.0 == 0.0) value.toInt().toString() else value.toString()) }
-    VTextField(text, { text = it; it.toDoubleOrNull()?.let(onValue) }, label, numeric = true, suffix = suffix)
-}
-
-@Composable
-private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, Modifier.weight(1f), fontSize = 15.sp, fontWeight = FontWeight.Medium)
-        Switch(checked = checked, onCheckedChange = onChange)
-    }
-}
-
-@Composable
-private fun ActionChips(value: String, onChange: (String) -> Unit) {
-    SectionLabel("When it triggers", color = MaterialTheme.colorScheme.onSurfaceVariant)
-    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        ACTIONS.forEach { (id, label) -> FilterChip(selected = value == id, onClick = { onChange(id) }, label = { Text(label) }) }
-    }
-}
-
-@Composable
-private fun OutletChips(strip: Strip, selected: Int?, onSelect: (Int) -> Unit) {
-    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        strip.outlets.forEach { o ->
-            FilterChip(selected = selected == o.n - 1, onClick = { onSelect(o.n - 1) }, label = { Text(o.name.ifBlank { "Outlet ${o.n}" }, maxLines = 1) })
-        }
-    }
-}
-
-@Composable
-private fun RuleEditor(vm: StripsViewModel, strip: Strip, type: String, initial: RuleItem, siblings: List<RuleItem>, onClose: () -> Unit) {
-    val kind = kindOf(type)
-    val perOutlet = type == "smart-timer" || type == "auto-timer" || type == "power-automation"
-    var relay by remember { mutableStateOf(initial.relayIndex ?: if (perOutlet) strip.outlets.firstOrNull()?.let { it.n - 1 } else null) }
-    val unique = type == "smart-timer" || type == "auto-timer" || type == "voltage-protection"
-    val current = when {
-        initial.id.isNotBlank() && !unique -> initial
-        type == "voltage-protection" -> siblings.firstOrNull()
-        unique -> siblings.firstOrNull { it.relayIndex == relay }
-        else -> null
-    }
-    var error by remember { mutableStateOf<String?>(null) }
-
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
-        ScreenHeader(strip.name, kind.blurb, onBack = onClose, eyebrow = kind.title)
-        key(current?.id, relay.takeIf { unique }) {
-            var params by remember { mutableStateOf(JSONObject((current?.params ?: defaultParams(type, strip)).toString())) }
-            var enabled by remember { mutableStateOf(current?.enabled ?: true) }
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(bottom = 28.dp)) {
-                if (perOutlet) {
-                    SectionLabel("Outlet", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (unique || initial.id.isBlank()) OutletChips(strip, relay) { relay = it }
-                    else Text(outletLabel(strip, relay), fontWeight = FontWeight.SemiBold)
-                }
-                when (type) {
-                    "smart-timer" -> SmartTimerFields(params) { params = it }
-                    "auto-timer" -> {
-                        SectionLabel("Home state", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        SegTabs(listOf("ON", "OFF"), if (params.optString("homeState") == "on") 0 else 1, { params = params.with("homeState", if (it == 0) "on" else "off") })
-                        SectionLabel("Return after", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf(5, 15, 30, 60, 120, 360, 720, 1440).forEach { m ->
-                                FilterChip(selected = params.optInt("returnAfterMin") == m, onClick = { params = params.with("returnAfterMin", m) }, label = { Text(duration(m)) })
-                            }
-                        }
-                        NumField("Custom minutes", params.optDouble("returnAfterMin"), "min") { params = params.with("returnAfterMin", it.toInt()) }
-                        SwitchRow("Repeat every time", params.optBoolean("repeat", true)) { params = params.with("repeat", it) }
-                    }
-                    "power-automation" -> {
-                        SectionLabel("Trigger when power is", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        SegTabs(listOf("Below", "Above"), if (params.optString("direction") == "below") 0 else 1, { params = params.with("direction", if (it == 0) "below" else "above") })
-                        NumField("Threshold", params.optDouble("thresholdW"), "W") { params = params.with("thresholdW", it) }
-                        NumField("For at least", params.optDouble("holdMin"), "min") { params = params.with("holdMin", it) }
-                        ActionChips(params.optString("action")) { params = params.with("action", it) }
-                    }
-                    "voltage-protection" -> {
-                        SwitchRow("Low voltage limit", params.optBoolean("lowEnabled")) { params = params.with("lowEnabled", it) }
-                        if (params.optBoolean("lowEnabled")) NumField("Lower limit", params.optDouble("lowV"), "V") { params = params.with("lowV", it) }
-                        SwitchRow("High voltage limit", params.optBoolean("highEnabled")) { params = params.with("highEnabled", it) }
-                        if (params.optBoolean("highEnabled")) NumField("Upper limit", params.optDouble("highV"), "V") { params = params.with("highV", it) }
-                        NumField("Out of range for", params.optDouble("holdSec"), "sec") { params = params.with("holdSec", it.toInt()) }
-                        ActionChips(params.optString("action")) { params = params.with("action", it) }
-                        SectionLabel("Outlets to switch off", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        val picked = params.optJSONArray("outlets").ints()
-                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            strip.outlets.forEach { o ->
-                                val i = o.n - 1
-                                FilterChip(
-                                    selected = i in picked,
-                                    onClick = { params = params.with("outlets", JSONArray(if (i in picked) picked - i else (picked + i).sorted())) },
-                                    label = { Text(o.name.ifBlank { "Outlet ${o.n}" }, maxLines = 1) },
-                                )
-                            }
-                        }
-                        NumField("Restore after normal for (0 = never)", params.optDouble("restoreAfterMin"), "min") { params = params.with("restoreAfterMin", it.toInt()) }
-                    }
-                    else -> {
-                        SectionLabel("Scope", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        SegTabs(listOf("Whole strip", "One outlet"), if (params.optString("scope") == "strip") 0 else 1, {
-                            params = params.with("scope", if (it == 0) "strip" else "outlet")
-                            if (it == 1 && relay == null) relay = strip.outlets.firstOrNull()?.let { o -> o.n - 1 }
-                        })
-                        if (params.optString("scope") == "outlet") OutletChips(strip, relay) { relay = it }
-                        NumField("Current limit", params.optDouble("limitA"), "A") { params = params.with("limitA", it) }
-                        NumField("Over the limit for", params.optDouble("holdSec"), "sec") { params = params.with("holdSec", it.toInt()) }
-                        ActionChips(params.optString("action")) { params = params.with("action", it) }
-                    }
-                }
-                SwitchRow("Enabled", enabled) { enabled = it }
-                error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 13.sp) }
-                PrimaryButton("Save") {
-                    val target = when (type) {
-                        "voltage-protection" -> null
-                        "current-protection" -> if (params.optString("scope") == "outlet") relay else null
-                        else -> relay
-                    }
-                    error = when {
-                        type == "voltage-protection" && params.optBoolean("lowEnabled") && params.optBoolean("highEnabled") && params.optDouble("lowV") >= params.optDouble("highV") -> "Lower limit must be below the upper limit."
-                        type == "voltage-protection" && params.optJSONArray("outlets").ints().isEmpty() -> "Pick at least one outlet."
-                        type == "smart-timer" && params.optJSONArray("days").ints().isEmpty() -> "Pick at least one day."
-                        type == "auto-timer" && params.optInt("returnAfterMin") < 1 -> "Return time must be at least 1 minute."
-                        type == "current-protection" && params.optDouble("limitA") <= 0 -> "Enter a current limit above 0."
-                        perOutlet && target == null -> "Choose an outlet."
-                        else -> null
-                    }
-                    if (error == null) {
-                        vm.saveRule(RuleItem(current?.id.orEmpty(), type, strip.mac, target, current?.name.orEmpty(), enabled, params), onDone = onClose)
-                    }
-                }
-                if (current != null) {
-                    TextButton(onClick = { vm.deleteRule(current.id); onClose() }, Modifier.fillMaxWidth()) {
-                        Text("Delete rule", color = MaterialTheme.colorScheme.error)
-                    }
-                }
-            }
-        }
-    }
-}
-
 private fun presetSlots(from: Int, to: Int) = buildString { repeat(96) { append(if (it in from until to) '1' else '0') } }
 
 @Composable
-private fun SmartTimerFields(params: JSONObject, onChange: (JSONObject) -> Unit) {
+internal fun SmartTimerFields(params: JSONObject, onChange: (JSONObject) -> Unit) {
     val slots = params.optString("slots").padEnd(96, '0')
     val days = params.optJSONArray("days").ints()
     val scheme = MaterialTheme.colorScheme
@@ -575,14 +348,6 @@ private fun SmartTimerFields(params: JSONObject, onChange: (JSONObject) -> Unit)
         }
         FilterChip(selected = false, onClick = { onChange(params.with("slots", "0".repeat(96))) }, label = { Text("Clear all") })
     }
-    SectionLabel("Repeat on", color = scheme.onSurfaceVariant)
-    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        DAYS.forEachIndexed { i, d ->
-            FilterChip(
-                selected = i in days,
-                onClick = { onChange(params.with("days", JSONArray(if (i in days) days - i else (days + i).sorted()))) },
-                label = { Text(d) },
-            )
-        }
-    }
+    FormLabel("Repeat on", top = 4.dp)
+    DayChips(days.toSet()) { i -> onChange(params.with("days", JSONArray(if (i in days) days - i else (days + i).sorted()))) }
 }

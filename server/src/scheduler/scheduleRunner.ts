@@ -4,13 +4,25 @@ import type { StoredSchedule } from '../db/schema.js';
 import { logEvent } from '../services/eventService.js';
 import { setAllRelays, setRelay } from '../services/fleetService.js';
 import { notify } from '../services/notificationService.js';
-import { markFired } from '../services/scheduleService.js';
+import { defaultTimezone, disableSchedule, markFired } from '../services/scheduleService.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('scheduleRunner');
 
-function currentHHMM(d: Date): string {
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/** Wall-clock time and weekday of `d` in an IANA zone (falls back to server zone if unknown). */
+export function zonedParts(d: Date, zone: string): { hhmm: string; dow: number } {
+  const fmt = (timeZone?: string) =>
+    new Intl.DateTimeFormat('en-US', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23', weekday: 'short' }).formatToParts(d);
+  let parts: Intl.DateTimeFormatPart[];
+  try {
+    parts = fmt(zone);
+  } catch {
+    parts = fmt();
+  }
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
+  return { hhmm: `${get('hour')}:${get('minute')}`, dow: DOW.indexOf(get('weekday')) };
 }
 
 function truncToMinute(iso: string): string {
@@ -28,6 +40,7 @@ export async function fireSchedule(driver: StripDriver, schedule: StoredSchedule
     await setRelay(driver, schedule.stripId, schedule.relayIndex, schedule.action, 'schedule');
   }
   await markFired(schedule.id);
+  if (schedule.repeat === 'once') await disableSchedule(schedule.id);
 
   const relay = schedule.relayIndex !== null ? db.data.relays.find((r) => r.stripId === schedule.stripId && r.index === schedule.relayIndex) : null;
   const target = relay ? relay.name : 'all outlets';
@@ -53,14 +66,14 @@ export async function fireSchedule(driver: StripDriver, schedule: StoredSchedule
 
 export async function runDueSchedules(driver: StripDriver): Promise<void> {
   const now = new Date();
-  const hhmm = currentHHMM(now);
-  const dow = now.getDay();
   const nowMinuteKey = truncToMinute(now.toISOString());
 
   const db = getMainDb();
-  const due = db.data.schedules.filter(
-    (s) => s.enabled && s.time === hhmm && s.daysOfWeek.includes(dow) && (!s.lastFiredAt || truncToMinute(s.lastFiredAt) !== nowMinuteKey),
-  );
+  const due = db.data.schedules.filter((s) => {
+    if (!s.enabled || (s.lastFiredAt && truncToMinute(s.lastFiredAt) === nowMinuteKey)) return false;
+    const { hhmm, dow } = zonedParts(now, s.timezone ?? defaultTimezone());
+    return s.time === hhmm && (s.repeat === 'once' || s.daysOfWeek.includes(dow));
+  });
 
   for (const schedule of due) {
     try {

@@ -47,6 +47,8 @@ export interface StoredSchedule {
   action: RelayStateValue;
   time: string;
   daysOfWeek: number[];
+  timezone?: string;
+  repeat?: 'weekly' | 'once';
   enabled: boolean;
   lastFiredAt: string | null;
   createdAt: string;

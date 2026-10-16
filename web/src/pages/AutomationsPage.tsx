@@ -13,6 +13,11 @@ import { useFleetStore } from '../store/fleetStore';
 import { useSettingsStore } from '../store/settingsStore';
 
 const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
+const ZONES = [
+  'Africa/Cairo', 'Asia/Riyadh', 'Asia/Dubai', 'Asia/Kuwait', 'Asia/Baghdad', 'Asia/Amman', 'Asia/Beirut', 'Europe/Istanbul',
+  'Africa/Casablanca', 'Africa/Lagos', 'Africa/Johannesburg', 'Europe/London', 'Europe/Paris', 'Europe/Berlin',
+  'America/New_York', 'America/Chicago', 'America/Los_Angeles', 'Asia/Kolkata', 'Asia/Singapore', 'Asia/Tokyo', 'Australia/Sydney', 'UTC',
+];
 
 interface FormState {
   id?: string;
@@ -22,10 +27,12 @@ interface FormState {
   action: 'on' | 'off';
   time: string;
   daysOfWeek: number[];
+  timezone: string;
+  repeat: 'weekly' | 'once';
 }
 
 function emptyForm(defaultStripId: string): FormState {
-  return { name: '', stripId: defaultStripId, relayIndex: null, action: 'on', time: '18:00', daysOfWeek: [...ALL_DAYS] };
+  return { name: '', stripId: defaultStripId, relayIndex: null, action: 'on', time: '18:00', daysOfWeek: [...ALL_DAYS], timezone: 'Africa/Cairo', repeat: 'weekly' };
 }
 
 function timeToDisplay(time: string, format: '12h' | '24h'): string {
@@ -60,7 +67,7 @@ export default function AutomationsPage() {
 
   const openCreate = () => setForm(emptyForm(filterStripId ?? strips[0]?.id ?? ''));
   const openEdit = (s: ScheduleDTO) =>
-    setForm({ id: s.id, name: s.name, stripId: s.stripId, relayIndex: s.relayIndex, action: s.action, time: s.time, daysOfWeek: s.daysOfWeek });
+    setForm({ id: s.id, name: s.name, stripId: s.stripId, relayIndex: s.relayIndex, action: s.action, time: s.time, daysOfWeek: s.daysOfWeek, timezone: s.timezone, repeat: s.repeat });
 
   const save = async () => {
     if (!form) return;
@@ -72,7 +79,9 @@ export default function AutomationsPage() {
         relayIndex: form.relayIndex,
         action: form.action,
         time: form.time,
-        daysOfWeek: form.daysOfWeek,
+        daysOfWeek: form.repeat === 'once' ? ALL_DAYS : form.daysOfWeek,
+        timezone: form.timezone,
+        repeat: form.repeat,
       };
       if (form.id) {
         await api.patch(`/schedules/${form.id}`, payload);
@@ -125,10 +134,12 @@ export default function AutomationsPage() {
               <CardBody className="flex flex-col gap-3 sm:flex-row sm:items-center">
                 <Toggle checked={s.enabled} onChange={() => void toggleEnabled(s)} />
                 <button type="button" className="min-w-0 flex-1 text-left" onClick={() => openEdit(s)}>
-                  <p className="truncate font-medium text-text">{s.name}</p>
+                  <p className="truncate font-medium text-text">
+                    <span className="font-mono text-primary">{timeToDisplay(s.time, timeFormat)}</span> · {s.action.toUpperCase()}
+                    {s.name ? <span className="text-text-muted"> · {s.name}</span> : null}
+                  </p>
                   <p className="text-xs text-text-muted">
-                    {strip?.name ?? 'Unknown strip'} · {target} · turns {s.action} at {timeToDisplay(s.time, timeFormat)} ·{' '}
-                    {s.daysOfWeek.length === 7 ? 'Every day' : s.daysOfWeek.map((d) => DAY_NAMES[d]).join(', ')}
+                    {strip?.name ?? 'Unknown strip'} · {target} · {s.repeat === 'once' ? 'One-time' : s.daysOfWeek.length === 7 ? 'Every day' : s.daysOfWeek.map((d) => DAY_NAMES[d]).join(', ')} · {s.timezone}
                   </p>
                 </button>
                 <div className="flex gap-2">
@@ -163,7 +174,7 @@ export default function AutomationsPage() {
         {form && (
           <div className="flex flex-col gap-3">
             <div>
-              <Label htmlFor="autoName">Name</Label>
+              <Label htmlFor="autoName">Label (optional)</Label>
               <Input id="autoName" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Evening lights" />
             </div>
             <div>
@@ -207,6 +218,32 @@ export default function AutomationsPage() {
               </div>
             </div>
             <div>
+              <Label>Repeat</Label>
+              <div className="grid grid-cols-2 gap-1.5">
+                {(['weekly', 'once'] as const).map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => setForm({ ...form, repeat: r })}
+                    className={`h-9 rounded-lg border text-sm font-medium ${form.repeat === r ? 'border-primary bg-primary/10 text-primary' : 'border-border text-text-muted'}`}
+                  >
+                    {r === 'weekly' ? 'Weekly' : 'One-time'}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <Label htmlFor="autoTz">Timezone</Label>
+              <Select id="autoTz" value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })}>
+                {(ZONES.includes(form.timezone) ? ZONES : [form.timezone, ...ZONES]).map((z) => (
+                  <option key={z} value={z}>
+                    {z}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            {form.repeat === 'weekly' && (
+            <div>
               <Label>Repeat on</Label>
               <div className="flex gap-1.5">
                 {DAY_NAMES.map((name, idx) => {
@@ -229,6 +266,7 @@ export default function AutomationsPage() {
                 })}
               </div>
             </div>
+            )}
           </div>
         )}
       </Modal>
