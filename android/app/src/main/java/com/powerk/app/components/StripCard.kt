@@ -165,9 +165,11 @@ private fun StripHead(strip: Strip, onEdit: () -> Unit, onOpen: () -> Unit) {
         Spacer(Modifier.width(9.dp))
         Column(Modifier.weight(1f).tap(onClick = onEdit)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(strip.name, Modifier.weight(1f, fill = false), fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(Privacy.name(strip), Modifier.weight(1f, fill = false), fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.width(4.dp))
                 Icon(Icons.Rounded.Edit, "Edit strip", Modifier.size(12.dp), tint = scheme.onSurfaceVariant)
+                Spacer(Modifier.width(6.dp))
+                NameEye(strip, 15.dp)
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(6.dp).background(if (strip.online) scheme.primary else scheme.error, CircleShape))
@@ -233,7 +235,7 @@ fun StripRow(strip: Strip, vm: StripsViewModel, onOpen: () -> Unit, modifier: Mo
             IconBox(size = 36.dp, modifier = Modifier.tap(onClick = { stripSheet = true })) { Text(iconGlyph(strip.icon), fontSize = 17.sp) }
             Spacer(Modifier.width(9.dp))
             Column(Modifier.weight(1f)) {
-                Text(strip.name, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(Privacy.name(strip), fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
                     if (strip.online) "$onCount/${strip.outlets.size} on · ${fmtW(strip.powerW)}" else "Offline",
                     fontSize = 11.sp, fontFamily = Mono, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,

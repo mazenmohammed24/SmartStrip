@@ -130,7 +130,7 @@ fun OutletSheet(mac: String, n: Int, vm: StripsViewModel, onDismiss: () -> Unit)
             Column(Modifier.weight(1f)) {
                 Text(outlet.name, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(strip.name, fontSize = 12.sp, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    Text(Privacy.name(strip), fontSize = 12.sp, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                     Text("  ·  ", fontSize = 12.sp, color = scheme.onSurfaceVariant)
                     OnForText(outlet, color = if (outlet.on) scheme.primary else scheme.onSurfaceVariant)
                 }
@@ -255,8 +255,12 @@ fun StripSheet(mac: String, vm: StripsViewModel, onDismiss: () -> Unit, onOpenDe
             IconBox(size = 42.dp) { Text(iconGlyph(strip.icon), fontSize = 20.sp) }
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                Text(strip.name, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("${strip.model} · ${strip.mac.takeLast(6)}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(Privacy.name(strip), Modifier.weight(1f, fill = false), fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Spacer(Modifier.width(6.dp))
+                    NameEye(strip, 16.dp)
+                }
+                Text("${strip.model} · ${Privacy.id(strip, strip.mac.takeLast(6))}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
             }
             WifiBars(strip.rssi, active = strip.online)
         }

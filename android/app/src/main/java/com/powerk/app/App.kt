@@ -53,6 +53,8 @@ import androidx.compose.material3.ShortNavigationBarItem
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -200,6 +202,7 @@ private fun PowerkNavigation(vm: StripsViewModel) {
     
     val items = TABS.map { DockItem(it.icon, it.label(), if (it.route == ACTIVITY) vm.unread else 0) }
     
+    CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onBackground) {
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         NavHost(
             nav,
@@ -254,6 +257,7 @@ private fun PowerkNavigation(vm: StripsViewModel) {
         ) {
             FloatingDock(items, TABS.indexOfFirst { it.route == currentTab }, { i -> if (currentTab != TABS[i].route) goTab(TABS[i].route) })
         }
+    }
     }
 }
 

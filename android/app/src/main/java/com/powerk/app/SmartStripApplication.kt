@@ -7,5 +7,6 @@ class SmartStripApplication : Application() {
         super.onCreate()
         Server.init(this)
         Diag.init(this)
+        com.powerk.app.components.Privacy.init(this)
     }
 }

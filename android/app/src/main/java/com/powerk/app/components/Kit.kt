@@ -316,20 +316,25 @@ fun VTextField(
     var text by remember(value) { mutableStateOf(value) }
     val dismiss = rememberDismissKeyboard()
     fun commit() { if (text != value && text.isNotBlank()) onChange(text.trim()) else text = value }
-    Surface(shape = RoundedCornerShape(10.dp), color = scheme.surfaceContainer, border = BorderStroke(1.dp, scheme.outlineVariant)) {
-        Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+    // Numeric/suffixed fields stay compact; text fields fill the available width.
+    val compact = numeric || suffix != null
+    Surface(modifier = if (compact) modifier else modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp), color = scheme.surfaceContainer, border = BorderStroke(1.dp, scheme.outlineVariant)) {
+        Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             BasicTextField(
                 value = text,
                 onValueChange = { text = it },
                 singleLine = singleLine,
-                textStyle = TextStyle(fontSize = 13.sp, fontFamily = Mono, color = scheme.onSurface, textAlign = TextAlign.End),
+                textStyle = TextStyle(fontSize = 13.sp, fontFamily = Mono, color = scheme.onSurface, textAlign = if (compact) TextAlign.End else TextAlign.Start),
                 cursorBrush = SolidColor(scheme.primary),
                 keyboardOptions = KeyboardOptions(
                     keyboardType = if (numeric) KeyboardType.Decimal else KeyboardType.Text,
                     imeAction = ImeAction.Done,
                 ),
                 keyboardActions = KeyboardActions(onDone = { commit(); dismiss() }),
-                modifier = Modifier.width(80.dp).onFocusChanged { if (!it.isFocused) commit() },
+                decorationBox = { inner ->
+                    Box { if (text.isEmpty()) Text(label, fontSize = 13.sp, color = scheme.onSurfaceVariant); inner() }
+                },
+                modifier = (if (compact) Modifier.width(80.dp) else Modifier.weight(1f)).onFocusChanged { if (!it.isFocused) commit() },
             )
             if (suffix != null) Text(" $suffix", fontSize = 11.sp, color = scheme.onSurfaceVariant)
         }

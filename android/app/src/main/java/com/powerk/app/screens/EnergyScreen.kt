@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
@@ -56,6 +57,9 @@ import com.powerk.app.components.ConfirmDialog
 import com.powerk.app.components.EmptyState
 import com.powerk.app.components.Mono
 import com.powerk.app.components.Pill
+import com.powerk.app.components.Privacy
+import com.powerk.app.components.iconGlyph
+
 import com.powerk.app.components.ScreenHeader
 import com.powerk.app.components.SectionLabel
 import com.powerk.app.components.SegTabs
@@ -97,7 +101,7 @@ fun EnergyScreen(vm: StripsViewModel, initialStrip: String?, onBack: (() -> Unit
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 104.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item(key = "header") { ScreenHeader(strips.firstOrNull { it.mac == mac }?.name ?: "Consumption", onBack = onBack, eyebrow = "Energy") }
+        item(key = "header") { ScreenHeader(strips.firstOrNull { it.mac == mac }?.let { Privacy.name(it) } ?: "Consumption", onBack = onBack, eyebrow = "Energy") }
         if (mac == null) {
             item { EmptyState("No strips", "Add a strip to see its consumption.") }
             return@LazyColumn
@@ -105,7 +109,7 @@ fun EnergyScreen(vm: StripsViewModel, initialStrip: String?, onBack: (() -> Unit
         if (strips.size > 1) {
             item(key = "strips") {
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    strips.forEach { s -> FilterChip(selected = s.mac == mac, onClick = { picked = s.mac }, label = { Text(s.name, maxLines = 1) }) }
+                    strips.forEach { s -> FilterChip(selected = s.mac == mac, onClick = { picked = s.mac }, label = { Text(Privacy.name(s), maxLines = 1) }) }
                 }
             }
         }
@@ -161,10 +165,12 @@ fun EnergyScreen(vm: StripsViewModel, initialStrip: String?, onBack: (() -> Unit
                     report.outlets.forEachIndexed { i, o ->
                         if (i > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.outlineVariant))
                         Row(Modifier.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            SocketFace(true, 38.dp)
+                            val live = strips.firstOrNull { it.mac == mac }?.outlets?.firstOrNull { it.n == o.relayIndex + 1 }
+                            val glyph = live?.icon?.takeIf { it.isNotBlank() && it != "plug" }
+                            if (glyph == null) SocketFace(true, 38.dp) else Box(Modifier.size(38.dp), contentAlignment = Alignment.Center) { Text(iconGlyph(glyph), fontSize = 26.sp) }
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
-                                Text(o.name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                Text(live?.name?.ifBlank { null } ?: o.name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                                 Spacer(Modifier.height(6.dp))
                                 Box(
                                     Modifier.fillMaxWidth((o.kwh / max).toFloat().coerceIn(0.015f, 1f)).height(6.dp)

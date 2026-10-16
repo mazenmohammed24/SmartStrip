@@ -115,10 +115,14 @@ fun TilesStripCard(strip: Strip, vm: StripsViewModel, onOpen: () -> Unit, modifi
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(8.dp).background(if (strip.online) scheme.primary else scheme.error, CircleShape))
                 Spacer(Modifier.width(8.dp))
-                Text(strip.name, Modifier.weight(1f, fill = false).tap(onClick = onOpen), fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                    Text(Privacy.name(strip), Modifier.weight(1f, fill = false).tap(onClick = onOpen), fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Spacer(Modifier.width(6.dp))
+                    NameEye(strip, 16.dp)
+                }
                 Spacer(Modifier.width(6.dp))
-                Icon(Icons.Rounded.VisibilityOff, null, Modifier.size(15.dp), tint = scheme.onSurfaceVariant)
-                Spacer(Modifier.weight(1f))
+                WifiBars(strip.rssi, active = strip.online)
+                Spacer(Modifier.width(8.dp))
                 Pill(if (strip.online) "Online" else "Offline", if (strip.online) Tone.GOOD else Tone.BAD)
                 Spacer(Modifier.width(8.dp))
                 Icon(Icons.Rounded.Settings, "Strip settings", Modifier.size(22.dp).tap { stripSheet = true }, tint = scheme.onSurfaceVariant)
