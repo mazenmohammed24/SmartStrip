@@ -30,6 +30,25 @@ export function formatRelativeTime(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
+export function formatDuration(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const d = Math.floor(total / 86400);
+  const h = Math.floor((total % 86400) / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m`;
+  return `${total}s`;
+}
+
+export function rssiLevel(rssi: number | null | undefined): 0 | 1 | 2 | 3 | 4 {
+  if (rssi === null || rssi === undefined) return 0;
+  if (rssi >= -55) return 4;
+  if (rssi >= -67) return 3;
+  if (rssi >= -75) return 2;
+  return 1;
+}
+
 export function formatClock(iso: string, format: '12h' | '24h'): string {
   const d = new Date(iso);
   return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: format === '12h' });

@@ -45,6 +45,7 @@ export async function logEvent(input: LogEventInput): Promise<EventDTO> {
 
 export interface ListEventsQuery {
   stripId?: string;
+  relayIndex?: number;
   limit?: number;
   before?: string;
 }
@@ -53,6 +54,7 @@ export function listEvents(query: ListEventsQuery): EventDTO[] {
   const db = getEventsDb();
   let events = db.data.events;
   if (query.stripId) events = events.filter((e) => e.stripId === query.stripId);
+  if (query.relayIndex !== undefined && Number.isInteger(query.relayIndex)) events = events.filter((e) => e.relayIndex === query.relayIndex);
   if (query.before) events = events.filter((e) => e.createdAt < query.before!);
   const limit = Math.min(query.limit ?? 100, 500);
   return events.slice(0, limit).map(toDTO);

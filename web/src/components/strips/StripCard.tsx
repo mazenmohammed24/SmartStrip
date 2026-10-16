@@ -1,104 +1,151 @@
+import { memo, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { StripDTO } from '@shared/types';
-import { formatWatts } from '../../lib/formatters';
+import { ChevronRight, Pencil, Power } from 'lucide-react';
+import type { RelayDTO, StripDTO } from '@shared/types';
+import { formatDuration, formatWatts } from '../../lib/formatters';
 import { useFleetStore } from '../../store/fleetStore';
-import { Card, CardBody, CardHeader } from '../ui/Card';
-import { AllOnAllOffButtons } from './AllOnAllOffButtons';
-import { ConnectivityBadge } from './ConnectivityBadge';
-import { RelayToggle } from './RelayToggle';
-import { DeviceIcon, IconPicker } from './IconPicker';
-import { useEffect, useState } from 'react';
-import { RelayTimerModal } from './RelayTimerModal';
+import type { RelayTimerState } from '../../store/fleetStore';
+import { Toggle } from '../ui/Toggle';
+import { DeviceIcon } from './IconPicker';
+import { OutletModal } from './OutletModal';
+import { StripEditModal } from './StripEditModal';
+import { WifiBars } from './WifiBars';
 
-export function StripCard({ strip }: { strip: StripDTO }) {
+function useNow(): number {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  return now;
+}
+
+export const StripCard = memo(function StripCard({ strip }: { strip: StripDTO }) {
   const setAllRelays = useFleetStore((s) => s.setAllRelays);
   const setRelay = useFleetStore((s) => s.setRelay);
-  const setRelayIcon = useFleetStore((s) => s.setRelayIcon);
-  const setStripIcon = useFleetStore((s) => s.setStripIcon);
-  const startRelayTimer = useFleetStore((s) => s.startRelayTimer);
-  const cancelRelayTimer = useFleetStore((s) => s.cancelRelayTimer);
   const relayTimers = useFleetStore((s) => s.relayTimers);
-  const [pickingIconFor, setPickingIconFor] = useState<number | 'strip' | null>(null);
-  const [timerRelayIndex, setTimerRelayIndex] = useState<number | null>(null);
-  const [now, setNow] = useState(Date.now());
+  const [editing, setEditing] = useState(false);
+  const [outlet, setOutlet] = useState<number | null>(null);
+  const now = useNow();
+  const online = strip.connectivity === 'online';
   const onCount = strip.relays.filter((r) => r.state === 'on').length;
-
-  useEffect(() => {
-    const interval = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(interval);
-  }, []);
+  const dot = online ? 'bg-success' : strip.connectivity === 'offline' ? 'bg-danger' : 'bg-warning';
 
   return (
-    <Card className="flex flex-col">
-      <CardHeader>
-        <div className="flex min-w-0 items-start gap-3">
-          <button type="button" onClick={() => setPickingIconFor('strip')} title="Change strip icon" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-fg shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
-            <DeviceIcon icon={strip.icon} size={22} />
+    <article className="flex flex-col rounded-2xl border border-border bg-surface shadow-[0_1px_2px_rgb(24_32_27/0.05)]">
+      <header className="flex items-center gap-2.5 px-3 pt-3">
+        <button type="button" onClick={() => setEditing(true)} title="Edit strip" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-fg transition hover:brightness-110">
+          <DeviceIcon icon={strip.icon} size={20} />
+        </button>
+        <div className="min-w-0 flex-1">
+          <button type="button" onClick={() => setEditing(true)} className="group flex max-w-full items-center gap-1 text-left" title="Rename">
+            <span className="truncate text-sm font-semibold text-text">{strip.name}</span>
+            <Pencil size={11} className="shrink-0 text-text-muted opacity-0 transition group-hover:opacity-100" />
           </button>
-          <div className="min-w-0">
-            <Link to={`/strips/${strip.id}`} className="truncate text-base font-semibold text-text hover:underline">
-              {strip.name}
-            </Link>
-            <p className="truncate text-xs text-text-muted">{strip.location ?? strip.ipAddress ?? strip.model}</p>
-          </div>
+          <p className="flex items-center gap-1.5 truncate text-[11px] text-text-muted">
+            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} />
+            <span className="truncate">{online ? strip.location ?? strip.ipAddress ?? strip.model : strip.connectivity}</span>
+          </p>
         </div>
-        <ConnectivityBadge connectivity={strip.connectivity} />
-      </CardHeader>
-      <CardBody className="flex flex-1 flex-col justify-between gap-4">
-        <div className="flex items-baseline gap-2">
-          <span className="text-2xl font-semibold text-text">{formatWatts(strip.totalWatts)}</span>
-          <span className="text-sm text-text-muted">
-            {onCount}/{strip.relays.length} outlets on
+        {online && <WifiBars rssi={strip.telemetry?.rssi} size={15} />}
+        <Link to={`/strips/${strip.id}`} aria-label={`Open ${strip.name}`} className="flex h-8 w-8 items-center justify-center rounded-lg text-text-muted hover:bg-surface-hover hover:text-text">
+          <ChevronRight size={18} />
+        </Link>
+      </header>
+
+      <div className="flex items-center justify-between gap-2 px-3 pb-2 pt-2.5">
+        <p className="flex items-baseline gap-1.5">
+          <span className="font-mono text-xl font-semibold tabular-nums text-text">{formatWatts(strip.totalWatts)}</span>
+          <span className="text-[11px] text-text-muted">
+            {onCount}/{strip.relays.length} on
+            {strip.telemetry?.voltageV != null && ` · ${Math.round(strip.telemetry.voltageV)} V`}
           </span>
+        </p>
+        <div className="flex gap-1.5">
+          <button type="button" disabled={!online} onClick={() => void setAllRelays(strip.id, 'on')} className="rounded-lg bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary hover:bg-primary/20 disabled:opacity-40">
+            All on
+          </button>
+          <button type="button" disabled={!online} onClick={() => void setAllRelays(strip.id, 'off')} className="flex items-center gap-1 rounded-lg bg-surface-alt px-2.5 py-1 text-[11px] font-semibold text-text-muted hover:text-text disabled:opacity-40">
+            <Power size={11} />
+            Off
+          </button>
         </div>
-        <AllOnAllOffButtons
-          onAllOn={() => void setAllRelays(strip.id, 'on')}
-          onAllOff={() => void setAllRelays(strip.id, 'off')}
-          disabled={strip.connectivity !== 'online'}
+      </div>
+
+      <ul className="flex flex-col gap-1.5 px-2 pb-2">
+        {strip.relays.map((relay) => (
+          <OutletRow
+            key={relay.index}
+            strip={strip}
+            relay={relay}
+            now={now}
+            timer={relayTimers[`${strip.id}:${relay.index}`]}
+            disabled={!online}
+            onToggle={(checked) => void setRelay(strip.id, relay.index, checked ? 'on' : 'off')}
+            onOpen={() => setOutlet(relay.index)}
+          />
+        ))}
+      </ul>
+
+      {editing && <StripEditModal stripId={strip.id} onClose={() => setEditing(false)} />}
+      {outlet !== null && (
+        <OutletModal
+          stripId={strip.id}
+          relayIndex={outlet}
+          timerLabel={timerLabel(relayTimers[`${strip.id}:${outlet}`], now)}
+          onClose={() => setOutlet(null)}
         />
-        <div className="flex flex-col gap-2">
-          {strip.relays.map((relay) => (
-            <RelayToggle
-              key={relay.index}
-              relay={relay}
-              disabled={strip.connectivity !== 'online'}
-              onToggle={(checked) => void setRelay(strip.id, relay.index, checked ? 'on' : 'off')}
-              onIconClick={() => setPickingIconFor(relay.index)}
-              onTimerClick={() => setTimerRelayIndex(relay.index)}
-              timerLabel={timerLabel(relayTimers[`${strip.id}:${relay.index}`], now)}
-            />
-          ))}
-        </div>
-      </CardBody>
-      <IconPicker
-        open={pickingIconFor !== null}
-        value={pickingIconFor === 'strip' ? strip.icon : strip.relays.find((relay) => relay.index === pickingIconFor)?.icon ?? 'idle'}
-        onClose={() => setPickingIconFor(null)}
-        onSelect={async (icon) => {
-          if (pickingIconFor === 'strip') await setStripIcon(strip.id, icon);
-          else if (typeof pickingIconFor === 'number') await setRelayIcon(strip.id, pickingIconFor, icon);
-          setPickingIconFor(null);
-        }}
-      />
-      <RelayTimerModal
-        open={timerRelayIndex !== null}
-        relayName={strip.relays.find((relay) => relay.index === timerRelayIndex)?.name ?? 'Outlet'}
-        activeTimerLabel={timerRelayIndex === null ? undefined : timerLabel(relayTimers[`${strip.id}:${timerRelayIndex}`], now)}
-        onClose={() => setTimerRelayIndex(null)}
-        onStart={async (state, durationMinutes, mode) => {
-          if (timerRelayIndex === null) return;
-          await startRelayTimer(strip.id, timerRelayIndex, state, durationMinutes, mode);
-        }}
-        onCancelTimer={async () => {
-          if (timerRelayIndex === null) return;
-          await cancelRelayTimer(strip.id, timerRelayIndex);
-        }}
-      />
-    </Card>
+      )}
+    </article>
+  );
+});
+
+function OutletRow({
+  strip,
+  relay,
+  now,
+  timer,
+  disabled,
+  onToggle,
+  onOpen,
+}: {
+  strip: StripDTO;
+  relay: RelayDTO;
+  now: number;
+  timer?: RelayTimerState;
+  disabled: boolean;
+  onToggle: (checked: boolean) => void;
+  onOpen: () => void;
+}) {
+  const on = relay.state === 'on';
+  const temp = strip.telemetry?.outlets.find((o) => o.relayIndex === relay.index)?.temperatureC;
+  const parts: string[] = [];
+  if (on) {
+    parts.push(formatDuration(now - new Date(relay.lastChangedAt).getTime()));
+    parts.push(formatWatts(relay.watts));
+    if (temp !== undefined && temp > 0) parts.push(`${temp}°C`);
+  } else {
+    parts.push('Off');
+  }
+  const timed = timerLabel(timer, now);
+
+  return (
+    <li className={`flex items-center gap-2 rounded-xl px-2 py-1.5 transition-colors ${on ? 'bg-success-bg/60' : 'bg-surface-alt/60'}`}>
+      <button type="button" onClick={onOpen} className="flex min-w-0 flex-1 items-center gap-2.5 text-left" title={`Customise ${relay.name}`}>
+        <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${on ? 'bg-primary text-primary-fg' : 'bg-surface text-text-muted'}`}>
+          <DeviceIcon icon={relay.icon} size={16} />
+        </span>
+        <span className="min-w-0">
+          <span className="block truncate text-[13px] font-medium leading-tight text-text">{relay.name}</span>
+          <span className="block truncate text-[11px] leading-tight text-text-muted">{timed ?? parts.join(' · ')}</span>
+        </span>
+      </button>
+      <Toggle checked={on} onChange={onToggle} disabled={disabled} label={relay.name} />
+    </li>
   );
 }
 
-function timerLabel(timer: ReturnType<typeof useFleetStore.getState>['relayTimers'][string] | undefined, now: number): string | undefined {
+function timerLabel(timer: RelayTimerState | undefined, now: number): string | undefined {
   if (!timer) return undefined;
   const remainingSeconds = Math.max(0, Math.ceil((new Date(timer.restoreAt).getTime() - now) / 1000));
   const hours = Math.floor(remainingSeconds / 3600);

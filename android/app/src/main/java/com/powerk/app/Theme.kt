@@ -1,5 +1,6 @@
 package com.powerk.app
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -8,111 +9,125 @@ import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.graphics.Color
-import android.os.Build
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.material3.Typography
 
-private val LightScheme = lightColorScheme(
-    primary = Color(0xFF1B6B45),
-    onPrimary = Color(0xFFFFFFFF),
-    primaryContainer = Color(0xFFA6F2C4),
-    onPrimaryContainer = Color(0xFF00210F),
-    secondary = Color(0xFF4E6355),
-    onSecondary = Color(0xFFFFFFFF),
-    secondaryContainer = Color(0xFFD0E8D7),
-    onSecondaryContainer = Color(0xFF0B1F14),
-    tertiary = Color(0xFF3C6373),
-    onTertiary = Color(0xFFFFFFFF),
-    tertiaryContainer = Color(0xFFBFE9FC),
-    onTertiaryContainer = Color(0xFF001F29),
-    error = Color(0xFFBA1A1A),
-    onError = Color(0xFFFFFFFF),
-    errorContainer = Color(0xFFFFDAD6),
-    onErrorContainer = Color(0xFF410002),
-    background = Color(0xFFF5FBF5),
-    onBackground = Color(0xFF171D18),
-    surface = Color(0xFFF5FBF5),
-    onSurface = Color(0xFF171D18),
-    surfaceVariant = Color(0xFFDCE5DA),
-    onSurfaceVariant = Color(0xFF404943),
-    outline = Color(0xFF707972),
-    outlineVariant = Color(0xFFC0C9C0),
-    inverseSurface = Color(0xFF2C322D),
-    inverseOnSurface = Color(0xFFEDF3EC),
-    inversePrimary = Color(0xFF8AD5A7),
-    surfaceContainerLowest = Color(0xFFFFFFFF),
-    surfaceContainerLow = Color(0xFFEFF6EF),
-    surfaceContainer = Color(0xFFE9F0E9),
-    surfaceContainerHigh = Color(0xFFE3EAE3),
-    surfaceContainerHighest = Color(0xFFDDE4DD),
+val PlexSans = FontFamily(
+    Font(R.font.ibm_plex_sans_regular, FontWeight.Normal),
+    Font(R.font.ibm_plex_sans_medium, FontWeight.Medium),
+    Font(R.font.ibm_plex_sans_semibold, FontWeight.SemiBold),
+    Font(R.font.ibm_plex_sans_bold, FontWeight.Bold),
 )
 
-private val DarkScheme = darkColorScheme(
-    primary = Color(0xFF8AD5A7),
-    onPrimary = Color(0xFF00391E),
-    primaryContainer = Color(0xFF00522E),
-    onPrimaryContainer = Color(0xFFA6F2C4),
-    secondary = Color(0xFFB4CCB9),
-    onSecondary = Color(0xFF203528),
-    secondaryContainer = Color(0xFF364B3E),
-    onSecondaryContainer = Color(0xFFD0E8D7),
-    tertiary = Color(0xFFA4CCDF),
-    onTertiary = Color(0xFF063542),
-    tertiaryContainer = Color(0xFF234C5B),
-    onTertiaryContainer = Color(0xFFBFE9FC),
-    error = Color(0xFFFFB4AB),
-    onError = Color(0xFF690005),
-    errorContainer = Color(0xFF93000A),
-    onErrorContainer = Color(0xFFFFDAD6),
-    background = Color(0xFF0F1511),
-    onBackground = Color(0xFFDEE4DE),
-    surface = Color(0xFF0F1511),
-    onSurface = Color(0xFFDEE4DE),
-    surfaceVariant = Color(0xFF404943),
-    onSurfaceVariant = Color(0xFFC0C9C0),
-    outline = Color(0xFF8A938C),
-    outlineVariant = Color(0xFF404943),
-    inverseSurface = Color(0xFFDEE4DE),
-    inverseOnSurface = Color(0xFF2C322D),
-    inversePrimary = Color(0xFF1B6B45),
-    surfaceContainerLowest = Color(0xFF0A0F0B),
-    surfaceContainerLow = Color(0xFF171D19),
-    surfaceContainer = Color(0xFF1B211C),
-    surfaceContainerHigh = Color(0xFF252B26),
-    surfaceContainerHighest = Color(0xFF303631),
+val PlexMono = FontFamily(
+    Font(R.font.ibm_plex_mono_regular, FontWeight.Normal),
+    Font(R.font.ibm_plex_mono_medium, FontWeight.Medium),
+    Font(R.font.ibm_plex_mono_semibold, FontWeight.SemiBold),
+    Font(R.font.ibm_plex_mono_semibold, FontWeight.Bold),
 )
+
+private val PowerkTypography = Typography().let { t ->
+    t.copy(
+        displayLarge = t.displayLarge.copy(fontFamily = PlexSans),
+        displayMedium = t.displayMedium.copy(fontFamily = PlexSans),
+        displaySmall = t.displaySmall.copy(fontFamily = PlexSans),
+        headlineLarge = t.headlineLarge.copy(fontFamily = PlexSans),
+        headlineMedium = t.headlineMedium.copy(fontFamily = PlexSans),
+        headlineSmall = t.headlineSmall.copy(fontFamily = PlexSans),
+        titleLarge = t.titleLarge.copy(fontFamily = PlexSans),
+        titleMedium = t.titleMedium.copy(fontFamily = PlexSans),
+        titleSmall = t.titleSmall.copy(fontFamily = PlexSans),
+        bodyLarge = t.bodyLarge.copy(fontFamily = PlexSans),
+        bodyMedium = t.bodyMedium.copy(fontFamily = PlexSans),
+        bodySmall = t.bodySmall.copy(fontFamily = PlexSans),
+        labelLarge = t.labelLarge.copy(fontFamily = PlexSans),
+        labelMedium = t.labelMedium.copy(fontFamily = PlexSans),
+        labelSmall = t.labelSmall.copy(fontFamily = PlexSans),
+    )
+}
 
 private val PowerkShapes = Shapes(
-    extraSmall = RoundedCornerShape(6.dp),
+    extraSmall = RoundedCornerShape(8.dp),
     small = RoundedCornerShape(12.dp),
-    medium = RoundedCornerShape(18.dp),
-    large = RoundedCornerShape(24.dp),
-    extraLarge = RoundedCornerShape(30.dp),
+    medium = RoundedCornerShape(16.dp),
+    large = RoundedCornerShape(18.dp),
+    extraLarge = RoundedCornerShape(24.dp),
 )
 
 private fun parseColor(hex: String): Color {
-    val value = hex.removePrefix("#").toLongOrNull(16) ?: 0x1B6B45
+    val value = hex.removePrefix("#").toLongOrNull(16) ?: 0x1AA34A
     return Color(0xFF000000 or value)
 }
 
-private fun Color.container(alpha: Float, dark: Boolean): Color = if (dark) {
-    copy(red = red * alpha, green = green * alpha, blue = blue * alpha)
-} else {
-    copy(red = red + (1f - red) * alpha, green = green + (1f - green) * alpha, blue = blue + (1f - blue) * alpha)
-}
+private fun mix(a: Color, b: Color, t: Float) = Color(
+    red = a.red + (b.red - a.red) * t,
+    green = a.green + (b.green - a.green) * t,
+    blue = a.blue + (b.blue - a.blue) * t,
+)
 
-fun powerkScheme(dark: Boolean, systemScheme: ColorScheme? = null, accentHex: String = AppTheme.accentColor): ColorScheme {
-    val base = systemScheme ?: if (dark) DarkScheme else LightScheme
+fun powerkScheme(dark: Boolean, accentHex: String = AppTheme.accentColor): ColorScheme {
     val accent = parseColor(accentHex)
-    return base.copy(
+    return if (dark) darkColorScheme(
+        primary = mix(accent, Color.White, 0.12f),
+        onPrimary = Color(0xFF04210F),
+        primaryContainer = mix(Color(0xFF121B2E), accent, 0.28f),
+        onPrimaryContainer = mix(accent, Color.White, 0.65f),
+        secondary = Color(0xFF94A3B8),
+        secondaryContainer = Color(0xFF1E2A42),
+        onSecondaryContainer = Color(0xFFE5EAF3),
+        tertiary = Color(0xFFFBBF24),
+        tertiaryContainer = Color(0xFF3B2F0B),
+        onTertiaryContainer = Color(0xFFFDE68A),
+        error = Color(0xFFF87171),
+        onError = Color(0xFF450A0A),
+        errorContainer = Color(0xFF4C1D1D),
+        onErrorContainer = Color(0xFFFECACA),
+        background = Color(0xFF0B1220),
+        onBackground = Color(0xFFE5EAF3),
+        surface = Color(0xFF121B2E),
+        onSurface = Color(0xFFE5EAF3),
+        surfaceVariant = Color(0xFF1A2540),
+        onSurfaceVariant = Color(0xFF94A3B8),
+        outline = Color(0xFF64748B),
+        outlineVariant = Color(0xFF243047),
+        surfaceContainerLowest = Color(0xFF0B1220),
+        surfaceContainerLow = Color(0xFF0F182A),
+        surfaceContainer = Color(0xFF16213A),
+        surfaceContainerHigh = Color(0xFF1C2844),
+        surfaceContainerHighest = Color(0xFF243256),
+    ) else lightColorScheme(
         primary = accent,
-        primaryContainer = accent.container(if (dark) 0.34f else 0.74f, dark),
-        inversePrimary = accent,
+        onPrimary = Color.White,
+        primaryContainer = mix(Color.White, accent, 0.14f),
+        onPrimaryContainer = mix(accent, Color.Black, 0.45f),
+        secondary = Color(0xFF64748B),
+        secondaryContainer = Color(0xFFE2E8F0),
+        onSecondaryContainer = Color(0xFF0F172A),
+        tertiary = Color(0xFFD97706),
+        tertiaryContainer = Color(0xFFFEF3C7),
+        onTertiaryContainer = Color(0xFF78350F),
+        error = Color(0xFFDC2626),
+        onError = Color.White,
+        errorContainer = Color(0xFFFEE2E2),
+        onErrorContainer = Color(0xFF7F1D1D),
+        background = Color(0xFFF3F7FA),
+        onBackground = Color(0xFF0F172A),
+        surface = Color.White,
+        onSurface = Color(0xFF0F172A),
+        surfaceVariant = Color(0xFFF1F5F9),
+        onSurfaceVariant = Color(0xFF64748B),
+        outline = Color(0xFF94A3B8),
+        outlineVariant = Color(0xFFE1E8EF),
+        surfaceContainerLowest = Color.White,
+        surfaceContainerLow = Color(0xFFF8FAFC),
+        surfaceContainer = Color(0xFFF1F5F9),
+        surfaceContainerHigh = Color(0xFFE8EDF4),
+        surfaceContainerHighest = Color(0xFFE2E8F0),
     )
 }
 
@@ -126,14 +141,11 @@ fun PowerkTheme(
     },
     content: @Composable () -> Unit,
 ) {
-    val context = LocalContext.current
-    val systemScheme = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-    } else null
     MaterialExpressiveTheme(
-        colorScheme = powerkScheme(dark, systemScheme),
+        colorScheme = powerkScheme(dark),
         motionScheme = MotionScheme.expressive(),
         shapes = PowerkShapes,
+        typography = PowerkTypography,
         content = content,
     )
 }

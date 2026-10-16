@@ -1,6 +1,7 @@
 package com.powerk.app.screens
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -8,212 +9,182 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.rounded.AccessTime
+import androidx.compose.material.icons.rounded.BarChart
+import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularWavyProgressIndicator
-import androidx.compose.material3.ElevatedCard
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.powerk.app.Api
-import com.powerk.app.R
-import com.powerk.app.Server
+import androidx.compose.ui.unit.sp
+import com.powerk.app.Outlet
 import com.powerk.app.Strip
-import com.powerk.app.outlet
-import com.powerk.app.components.EmptyState
+import com.powerk.app.StripsViewModel
+import com.powerk.app.components.ConfirmDialog
+import com.powerk.app.components.IconBox
 import com.powerk.app.components.IconPickerMenu
-import com.powerk.app.components.MessageCard
-import com.powerk.app.components.MetricPill
-import com.powerk.app.components.OutletTile
+import com.powerk.app.components.MasterButton
+import com.powerk.app.components.Mono
+import com.powerk.app.components.Pill
+import com.powerk.app.components.ScreenHeader
+import com.powerk.app.components.SectionLabel
+import com.powerk.app.components.Stat
+import com.powerk.app.components.Tone
+import com.powerk.app.components.VCard
+import com.powerk.app.components.VTextField
+import com.powerk.app.components.WifiBars
+import com.powerk.app.components.tap
+import com.powerk.app.components.fmtKwh
+import com.powerk.app.components.fmtNum
+import com.powerk.app.components.fmtW
 import com.powerk.app.components.iconGlyph
-import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun StripDetailScreen(stripMac: String, onBack: () -> Unit) {
-    var strip by remember { mutableStateOf<Strip?>(null) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var loading by remember { mutableStateOf(true) }
-    var editName by remember { mutableStateOf(false) }
-    var nameValue by remember { mutableStateOf("") }
-    var showDeleteDialog by remember { mutableStateOf(false) }
-    var iconPickerOpen by remember { mutableStateOf(false) }
-    val pending = remember { mutableStateMapOf<String, Boolean>() }
-    val scope = rememberCoroutineScope()
+fun StripDetailScreen(
+    vm: StripsViewModel,
+    mac: String,
+    onBack: () -> Unit,
+    onEnergy: () -> Unit,
+    onSchedules: () -> Unit,
+) {
+    val strip = vm.strips.firstOrNull { it.mac == mac }
+    if (strip == null) {
+        LaunchedEffect(vm.loaded) { if (vm.loaded) onBack() }
+        Box(Modifier.fillMaxSize())
+        return
+    }
+    var renaming by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf(false) }
+    var stripPicker by remember { mutableStateOf(false) }
+    val schedules = vm.schedules.count { it.stripId == strip.mac }
 
-    fun load() {
-        loading = true
-        scope.launch {
-            try {
-                val snap = Api.snapshot(Server.base, Server.token)
-                strip = snap.strips.firstOrNull { it.mac == stripMac }
-                strip?.let { nameValue = it.name }
-                error = null
-            } catch (e: Exception) { error = e.message }
-            loading = false
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item(key = "header") {
+            ScreenHeader(
+                strip.name,
+                strip.model.ifBlank { null },
+                onBack = onBack,
+                actions = {
+                    Box {
+                        IconButton(onClick = { stripPicker = true }) { Text(iconGlyph(strip.icon), fontSize = 20.sp) }
+                        IconPickerMenu(stripPicker, strip.icon, { stripPicker = false }) { stripPicker = false; vm.updateIcon(strip.mac, null, it) }
+                    }
+                    IconButton(onClick = { renaming = true }) { Icon(Icons.Rounded.Edit, "Rename") }
+                },
+            )
         }
-    }
-
-    LaunchedEffect(stripMac) { load() }
-
-    if (showDeleteDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeleteDialog = false },
-            title = { Text(stringResource(R.string.delete_strip_confirm_title)) },
-            text = { Text(stringResource(R.string.delete_strip_confirm_body, strip?.name ?: stripMac)) },
-            confirmButton = {
-                Button(onClick = {
-                    showDeleteDialog = false
-                    scope.launch {
-                        try { Api.deleteStrip(Server.base, Server.token, stripMac); onBack() }
-                        catch (e: Exception) { error = e.message }
+        item(key = "power") {
+            VCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Power now", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(fmtW(strip.powerW), fontFamily = Mono, fontSize = 26.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                     }
-                }) { Text(stringResource(R.string.delete)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteDialog = false }) { Text(stringResource(R.string.cancel)) }
-            },
-        )
-    }
-
-    strip?.let { s ->
-        IconPickerMenu(
-            expanded = iconPickerOpen,
-            selected = s.icon,
-            onDismiss = { iconPickerOpen = false },
-            onSelect = { icon ->
-                iconPickerOpen = false
-                scope.launch {
-                    try { Api.updateStripIcon(Server.base, Server.token, stripMac, icon); load() }
-                    catch (e: Exception) { error = e.message }
+                    Pill(if (strip.online) "Online" else "Offline", if (strip.online) Tone.GOOD else Tone.BAD)
+                    Spacer(Modifier.width(10.dp))
+                    MasterButton(strip.on, strip.online, { vm.command(strip.mac, 0, !strip.on) }, 48.dp)
                 }
-            },
-        )
-    }
-
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                OutlinedButton(onClick = onBack, modifier = Modifier.size(40.dp), contentPadding = PaddingValues(0.dp)) {
-                    Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
-                }
-                Spacer(Modifier.weight(1f))
-                if (!loading && strip != null) {
-                    IconButton(onClick = { showDeleteDialog = true }) {
-                        Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.delete), tint = MaterialTheme.colorScheme.error)
-                    }
+                Spacer(Modifier.height(14.dp))
+                Row { Stat("Voltage", strip.voltage?.let { "${fmtNum(it, 0)} V" } ?: "—"); Stat("Current", strip.currentA?.let { "${fmtNum(it, 2)} A" } ?: "—"); Stat("Energy", "${fmtKwh(strip.energyKwh)} kWh") }
+                Spacer(Modifier.height(10.dp))
+                Row { Column(Modifier.weight(1f)) { Text("Signal", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1); Spacer(Modifier.height(3.dp)); WifiBars(strip.rssi, active = strip.online) }; Stat("Firmware", strip.fw.ifBlank { "—" }); Stat("ID", "…" + strip.mac.takeLast(4)) }
+            }
+        }
+        item(key = "outlets-label") { SectionLabel("Outlets") }
+        items(strip.outlets, key = { "o${it.n}" }) { o -> OutletRow(strip, o, vm) }
+        item(key = "auto-label") { SectionLabel("Automation & energy") }
+        item(key = "energy") { LinkRow(Icons.Rounded.BarChart, "Consumption", "Daily energy and cost", onEnergy) }
+        item(key = "schedules") { LinkRow(Icons.Rounded.AccessTime, "Schedules", if (schedules == 0) "None yet" else "$schedules active", onSchedules) }
+        item(key = "danger") {
+            VCard(onClick = { deleting = true }) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.Delete, null, tint = MaterialTheme.colorScheme.error)
+                    Spacer(Modifier.width(12.dp))
+                    Text("Remove strip", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
-        if (loading) {
-            item { CircularWavyProgressIndicator(Modifier.fillMaxWidth()) }
-        }
-        strip?.let { s ->
-            item {
-                ElevatedCard(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            FilledTonalButton(onClick = { iconPickerOpen = true }, modifier = Modifier.size(48.dp), contentPadding = PaddingValues(0.dp)) {
-                                Text(fontSize = MaterialTheme.typography.titleLarge.fontSize, text = iconGlyph(s.icon))
-                            }
-                            Spacer(Modifier.size(12.dp))
-                            if (editName) {
-                                OutlinedTextField(value = nameValue, onValueChange = { nameValue = it }, singleLine = true, label = { Text(stringResource(R.string.strip_name)) }, modifier = Modifier.weight(1f))
-                                IconButton(onClick = {
-                                    editName = false
-                                    scope.launch {
-                                        try { Api.updateStrip(Server.base, Server.token, stripMac, nameValue); load() }
-                                        catch (e: Exception) { error = e.message }
-                                    }
-                                }) { Icon(Icons.Filled.Edit, null) }
-                            } else {
-                                Text(s.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                                IconButton(onClick = { editName = true; nameValue = s.name }) { Icon(Icons.Filled.Edit, null) }
-                            }
-                        }
-                        HorizontalDivider()
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            MetricPill("${s.powerW.roundToInt()} W")
-                            MetricPill("${s.energyKwh} kWh")
-                            if (s.online) MetricPill(stringResource(R.string.online)) else MetricPill(stringResource(R.string.offline))
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilledTonalButton(onClick = { scope.launch { Api.setOutlet(Server.base, Server.token, s.mac, 0, true); load() } }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.all_on)) }
-                            OutlinedButton(onClick = { scope.launch { Api.setOutlet(Server.base, Server.token, s.mac, 0, false); load() } }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.all_off)) }
-                        }
-                    }
-                }
+    }
+
+    if (renaming) RenameDialog(strip.name, { renaming = false }) { vm.renameStrip(strip.mac, it) }
+    if (deleting) ConfirmDialog("Remove ${strip.name}?", "The strip and its schedules are deleted from the server.", "Remove", { vm.deleteStrip(strip.mac) { onBack() } }, { deleting = false })
+}
+
+@Composable
+private fun OutletRow(strip: Strip, o: Outlet, vm: StripsViewModel) {
+    var picker by remember { mutableStateOf(false) }
+    VCard(padding = 12.dp) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box {
+                IconBox(size = 40.dp) { Text(iconGlyph(o.icon), fontSize = 20.sp) }
+                Box(Modifier.size(40.dp).tap { picker = true })
+                IconPickerMenu(picker, o.icon, { picker = false }) { picker = false; vm.updateIcon(strip.mac, o.n, it) }
             }
-            item {
-                ElevatedCard(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text(stringResource(R.string.outlets_title), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        Spacer(Modifier.height(2.dp))
-                        (1..4).forEach { n ->
-                            val outletItem = s.outlet(n)
-                            if (outletItem != null) {
-                                val isPending = pending.containsKey("${s.mac}:$n")
-                                val isOn = pending["${s.mac}:$n"] ?: outletItem.on
-                                OutletTile(
-                                    outlet = outletItem,
-                                    on = isOn,
-                                    pending = isPending,
-                                    enabled = !isPending,
-                                    onToggle = { on ->
-                                        if (!isPending) {
-                                            pending["${s.mac}:$n"] = on
-                                            scope.launch {
-                                                try { Api.setOutlet(Server.base, Server.token, s.mac, n, on); load() }
-                                                catch (e: Exception) { error = e.message }
-                                                finally { pending.remove("${s.mac}:$n") }
-                                            }
-                                        }
-                                    },
-                                    onIconChange = { icon ->
-                                        scope.launch {
-                                            try { Api.updateOutletIcon(Server.base, Server.token, s.mac, n, icon); load() }
-                                            catch (e: Exception) { error = e.message }
-                                        }
-                                    },
-                                )
-                                if (n < 4) HorizontalDivider()
-                            }
-                        }
-                    }
-                }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(o.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    buildString { append(if (o.on) fmtW(o.powerW) else "Off"); if (o.tempC > 0) append(" · ${o.tempC}°C"); if (o.energyKwh > 0) append(" · ${fmtKwh(o.energyKwh)} kWh") },
+                    fontFamily = Mono,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
             }
-        }
-        error?.let { item { MessageCard(it, isError = true, icon = Icons.Filled.Warning) } }
-        if (!loading && strip == null && error == null) {
-            item { EmptyState(stringResource(R.string.strip_not_found), stringResource(R.string.strip_not_found_body), stringResource(R.string.refresh), onAction = { load() }) }
+            Switch(checked = o.on, onCheckedChange = { vm.command(strip.mac, o.n, it) }, enabled = strip.online)
         }
     }
+}
+
+@Composable
+private fun LinkRow(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
+    VCard(onClick = onClick, padding = 12.dp) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconBox(size = 40.dp) { Icon(icon, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary) }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, fontWeight = FontWeight.SemiBold)
+                Text(subtitle, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun RenameDialog(current: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+    var name by remember { mutableStateOf(current) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Rename strip") },
+        text = { VTextField(name, { name = it }, "Name") },
+        confirmButton = { TextButton(enabled = name.isNotBlank(), onClick = { onSave(name.trim()); onDismiss() }) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }

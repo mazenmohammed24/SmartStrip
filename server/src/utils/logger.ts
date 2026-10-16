@@ -1,3 +1,5 @@
+import { appendServer } from '../services/diagnosticsService.js';
+
 type LogLevel = 'info' | 'warn' | 'error' | 'debug';
 
 function timestamp(): string {
@@ -11,6 +13,10 @@ function write(level: LogLevel, scope: string, message: string, extra?: unknown)
     fn(line, extra);
   } else {
     fn(line);
+  }
+  if (level === 'warn' || level === 'error') {
+    const detail = extra instanceof Error ? (extra.stack ?? extra.message) : extra !== undefined ? String(extra) : '';
+    appendServer(level, scope, detail ? ` ` : message);
   }
 }
 

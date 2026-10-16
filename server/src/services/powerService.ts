@@ -1,5 +1,7 @@
-import type { PowerHistoryResponse, PowerPointDTO, PowerRange, PowerSummaryResponse, StripDTO } from '../../../shared/types.js';
+import type { EnergyReportDTO, PowerHistoryResponse, PowerPointDTO, PowerRange, PowerSummaryResponse, StripDTO, TariffInfoDTO, TariffMode } from '../../../shared/types.js';
 import { getMainDb } from '../db/mainDb.js';
+import { getSettings } from './settingsService.js';
+import { egyptMonthlyBill, egyptTariffInfo } from './tariff.js';
 import { getPowerDb } from '../db/powerDb.js';
 import type { PowerResolution, StoredPowerSample } from '../db/schema.js';
 import { newId } from '../utils/id.js';
@@ -221,17 +223,132 @@ export async function getCloudEnergyHistory(
   return { stripId: strip.id, relayIndex, range, points };
 }
 
+function priceKwh(mode: TariffMode, rate: number, monthBefore: number, kwh: number): number {
+  if (mode === 'flat') return kwh * rate;
+  return egyptMonthlyBill(monthBefore + kwh) - egyptMonthlyBill(monthBefore);
+}
+
+function monthStartOf(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), 1);
+}
+
 export function getSummary(stripId: string, liveWatts: number): PowerSummaryResponse {
   const db = getPowerDb();
-  const settings = getMainDb().data.settings;
-  const since = startOfDay(new Date());
+  const settings = getSettings();
+  const now = new Date();
+  const since = startOfDay(now);
   const rows = db.data.samples.filter((s) => s.stripId === stripId && s.resolution === 'minute' && s.bucketStart >= since);
   const todayKwh = round4(rows.reduce((a, r) => a + r.kwh, 0));
+  const monthFrom = monthStartOf(now).toISOString();
+  const currentHour = startOfHour(now);
+  const monthBefore = db.data.samples
+    .filter((s) => s.stripId === stripId && s.resolution === 'hour' && s.bucketStart < since && s.bucketStart >= monthFrom && s.bucketStart < currentHour)
+    .reduce((a, r) => a + r.kwh, 0);
   return {
     stripId,
     todayKwh,
-    todayCost: round2(todayKwh * settings.ratePerKwh),
-    currency: settings.currency,
+    todayCost: round2(priceKwh(settings.tariffMode, settings.ratePerKwh, monthBefore, todayKwh)),
+    currency: settings.tariffMode === 'egypt' ? 'EGP' : settings.currency,
     liveWatts,
   };
+}
+
+
+function localDateKey(d: Date): string {
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
+export function getEnergyReport(stripId: string, days: number, relayNames: Map<number, string>): EnergyReportDTO {
+  const settings = getSettings();
+  const now = new Date();
+  const currentHour = startOfHour(now);
+  const windowStart = new Date(now);
+  windowStart.setHours(0, 0, 0, 0);
+  windowStart.setDate(windowStart.getDate() - (days - 1));
+  const prevStart = new Date(windowStart);
+  prevStart.setDate(prevStart.getDate() - days);
+  // tariff slabs reset each calendar month, so pricing needs the month's earlier days too
+  const earliest = new Date(Math.min(monthStartOf(windowStart).getTime(), prevStart.getTime()));
+
+  // hour rows hold finished hours; minute rows cover the hour still in progress
+  const rows = getPowerDb().data.samples.filter(
+    (s) => s.stripId === stripId && s.bucketStart >= earliest.toISOString() && ((s.resolution === 'hour' && s.bucketStart < currentHour) || (s.resolution === 'minute' && s.bucketStart >= currentHour)),
+  );
+
+  const perDay = new Map<string, number>();
+  const perOutlet = new Map<number, number>();
+  let total = 0;
+  let previous = 0;
+  for (const r of rows) {
+    const at = new Date(r.bucketStart);
+    const key = localDateKey(at);
+    perDay.set(key, (perDay.get(key) ?? 0) + r.kwh);
+    if (at >= windowStart) {
+      perOutlet.set(r.relayIndex, (perOutlet.get(r.relayIndex) ?? 0) + r.kwh);
+      total += r.kwh;
+    } else if (at >= prevStart) {
+      previous += r.kwh;
+    }
+  }
+
+  const daily: EnergyReportDTO['daily'] = [];
+  let monthCum = 0;
+  let monthKey = '';
+  let cost = 0;
+  let monthToDate = 0;
+  const todayKey = localDateKey(now);
+  for (let d = new Date(earliest); localDateKey(d) <= todayKey; d.setDate(d.getDate() + 1)) {
+    const key = localDateKey(d);
+    if (key.slice(0, 7) !== monthKey) {
+      monthKey = key.slice(0, 7);
+      monthCum = 0;
+    }
+    const kwh = perDay.get(key) ?? 0;
+    const dayCost = priceKwh(settings.tariffMode, settings.ratePerKwh, monthCum, kwh);
+    monthCum += kwh;
+    if (key === todayKey) monthToDate = monthCum;
+    if (d >= windowStart) {
+      cost += dayCost;
+      daily.push({ date: key, kwh: round4(kwh), cost: round2(dayCost) });
+    }
+  }
+
+  const indexes = new Set<number>([...relayNames.keys(), ...perOutlet.keys()]);
+  const outlets = [...indexes]
+    .sort((a, b) => a - b)
+    .map((relayIndex) => {
+      const kwh = perOutlet.get(relayIndex) ?? 0;
+      return {
+        relayIndex,
+        name: relayNames.get(relayIndex) ?? `Outlet ${relayIndex + 1}`,
+        kwh: round4(kwh),
+        cost: round2(total > 0 ? (cost * kwh) / total : 0),
+      };
+    });
+
+  const tariff: TariffInfoDTO =
+    settings.tariffMode === 'egypt'
+      ? egyptTariffInfo(monthToDate)
+      : { mode: 'flat', name: 'Flat rate', monthToDateKwh: round2(monthToDate), currentLevel: -1, levels: [], note: 'One price for every kWh.' };
+
+  return {
+    stripId,
+    days,
+    totalKwh: round4(total),
+    previousKwh: round4(previous),
+    cost: round2(cost),
+    currency: settings.tariffMode === 'egypt' ? 'EGP' : settings.currency,
+    ratePerKwh: total > 0 ? round4(cost / total) : settings.tariffMode === 'egypt' ? (tariff.levels[Math.max(tariff.currentLevel, 0)]?.rate ?? 0) : settings.ratePerKwh,
+    tariff,
+    daily,
+    outlets,
+  };
+}
+export async function resetEnergy(stripId: string): Promise<void> {
+  for (const key of [...minuteBuffer.keys()]) if (key.startsWith(`${stripId}:`)) minuteBuffer.delete(key);
+  const db = getPowerDb();
+  db.data.samples = db.data.samples.filter((s) => s.stripId !== stripId);
+  await db.write();
 }

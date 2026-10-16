@@ -14,6 +14,7 @@ const settingsPatchSchema = z.object({
   energyUnit: z.enum(['kWh', 'Wh']).optional(),
   currency: z.string().min(1).max(8).optional(),
   ratePerKwh: z.number().min(0).max(10).optional(),
+  tariffMode: z.enum(['egypt', 'flat']).optional(),
   overloadThresholdWatts: z.number().min(100).max(5000).optional(),
   timeFormat: z.enum(['12h', '24h']).optional(),
 });

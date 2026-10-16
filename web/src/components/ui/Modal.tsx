@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 
-export function Modal({ open, onClose, title, children, footer }: { open: boolean; onClose: () => void; title: string; children: ReactNode; footer?: ReactNode }) {
+export function Modal({ open, onClose, title, children, footer, size = 'md' }: { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode; footer?: ReactNode; size?: 'md' | 'lg' }) {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -17,11 +17,11 @@ export function Modal({ open, onClose, title, children, footer }: { open: boolea
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4" onClick={onClose}>
       <div
-        className="max-h-[90vh] w-full overflow-y-auto rounded-t-2xl bg-surface p-5 shadow-xl sm:max-w-md sm:rounded-2xl"
+        className={`max-h-[90vh] w-full overflow-y-auto rounded-t-2xl bg-surface p-4 shadow-xl sm:rounded-2xl sm:p-5 ${size === 'lg' ? 'sm:max-w-xl' : 'sm:max-w-md'}`}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-text">{title}</h2>
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <h2 className="min-w-0 truncate text-base font-semibold text-text">{title}</h2>
           <button onClick={onClose} className="rounded-lg p-1 text-text-muted hover:bg-surface-hover" aria-label="Close">
             ✕
           </button>

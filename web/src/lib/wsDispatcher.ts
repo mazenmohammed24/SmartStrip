@@ -1,5 +1,7 @@
 import { useFleetStore } from '../store/fleetStore';
 import { useNotificationStore } from '../store/notificationStore';
+import { useRulesStore } from '../store/rulesStore';
+import { useSettingsStore } from '../store/settingsStore';
 import { onWsMessage } from './wsClient';
 
 /**
@@ -24,7 +26,7 @@ export function wireWsDispatcher(): () => void {
         );
         break;
       case 'power-tick':
-        fleet.applyPowerTick(message.stripId, message.relays, message.totalWatts);
+        fleet.applyPowerTick(message.stripId, message.relays, message.totalWatts, message.telemetry);
         break;
       case 'strip-connectivity':
         fleet.applyConnectivity(message.stripId, message.connectivity);
@@ -37,6 +39,12 @@ export function wireWsDispatcher(): () => void {
         break;
       case 'strip-removed':
         fleet.applyStripRemoved(message.stripId);
+        break;
+      case 'rules-changed':
+        void useRulesStore.getState().fetchRules();
+        break;
+      case 'settings-changed':
+        useSettingsStore.setState({ settings: message.settings });
         break;
       case 'notification':
         notifications.addNotification(message.notification);

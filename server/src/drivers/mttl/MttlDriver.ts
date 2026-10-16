@@ -49,6 +49,8 @@ const MAX_TRACKED_DEVICES = 64;
  * under the poll interval, so a button press right after a command is not swallowed.
  */
 const OWN_COMMAND_WINDOW_MS = 1500;
+/** Last reading above this before an unrequested switch-off is treated as a protection trip. */
+const TRIP_MIN_WATTS = 1500;
 
 export interface MttlDriverOptions {
   /** TCP port the strip dials. Fixed at 10086 by the strip's firmware. */
@@ -459,6 +461,7 @@ export class MttlDriver implements StripDriver {
         // press or a protection trip must still reach the app.
         const isOurEcho = previous.lastCommandAt > 0 && Date.now() - previous.lastCommandAt < OWN_COMMAND_WINDOW_MS;
         if (!isOurEcho) {
+          if (previous.on && !reading.on && previous.watts >= TRIP_MIN_WATTS) overloads.push(reading.relayIndex);
           this.emit({
             type: 'relay-changed',
             driverStripId: device.mac,
@@ -468,11 +471,8 @@ export class MttlDriver implements StripDriver {
           });
         }
       }
-      // Edge-triggered: overload and overheat are levels that stay set while the
-      // condition persists. Emitting on every poll would fire a critical push
-      // notification every few seconds for as long as the strip is overloaded.
-      const faulted = reading.overload || reading.overheat;
-      if (faulted && !previous?.overload && !previous?.overheat) overloads.push(reading.relayIndex);
+      // The overload/overheat fields read "on" in every frame, even idle: they are
+      // protection-enabled flags, not fault flags, so a trip is inferred above instead.
       device.outlets[reading.relayIndex] = { ...reading, lastCommandAt: previous?.lastCommandAt ?? 0 };
     }
 
@@ -817,6 +817,14 @@ function snapshotOf(device: MttlDevice): StripStatusSnapshot {
     relays,
     totalWatts: round2(relays.reduce((sum, r) => sum + r.watts, 0)),
     timestamp: new Date().toISOString(),
+    telemetry: {
+      fw: device.fw,
+      voltageV: device.voltageV,
+      currentA: device.voltageV ? round2(relays.reduce((sum, r) => sum + r.watts, 0) / device.voltageV) : null,
+      rssi: device.rssi,
+      totalEnergyKwh: round3(device.outlets.reduce((sum, o) => sum + o.energyKwh, 0)),
+      outlets: device.outlets.map((o) => ({ relayIndex: o.relayIndex, energyKwh: o.energyKwh, temperatureC: o.temperatureC })),
+    },
   };
 }
 

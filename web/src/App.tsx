@@ -15,6 +15,10 @@ const NotificationsPage = lazy(() => import('./pages/NotificationsPage'));
 const PowerPage = lazy(() => import('./pages/PowerPage'));
 const ScanPage = lazy(() => import('./pages/ScanPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const EnergyPage = lazy(() => import('./pages/EnergyPage'));
+const RoomsPage = lazy(() => import('./pages/RoomsPage'));
+const RulesPage = lazy(() => import('./pages/RulesPage'));
+const StripSettingsPage = lazy(() => import('./pages/StripSettingsPage'));
 const StripDetailPage = lazy(() => import('./pages/StripDetailPage'));
 
 function PageFallback() {
@@ -43,6 +47,10 @@ function AppBootstrap() {
         <Route element={<AppShell />}>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/strips/:stripId" element={<StripDetailPage />} />
+          <Route path="/strips/:stripId/settings" element={<StripSettingsPage />} />
+          <Route path="/strips/:stripId/energy" element={<EnergyPage />} />
+          <Route path="/strips/:stripId/rules/:kind" element={<RulesPage />} />
+          <Route path="/rooms" element={<RoomsPage />} />
           <Route path="/scan" element={<ScanPage />} />
           <Route path="/power" element={<PowerPage />} />
           <Route path="/activity" element={<ActivityPage />} />

@@ -1,19 +1,26 @@
+import type { DeviceIconId } from './deviceIcons.js';
 // Shared type-only definitions used by both server and web.
 // Imported everywhere with `import type` so this file has zero runtime footprint.
 
 export type RelayStateValue = 'on' | 'off';
 export type ConnectivityState = 'online' | 'offline' | 'unreachable';
-export type ApplianceProfileName =
-  | 'power-strip' | 'lamp' | 'charger' | 'fridge' | 'heater' | 'idle'
-  | 'computer' | 'laptop' | 'monitor' | 'printer' | 'tv' | 'fan'
-  | 'air-conditioner' | 'coffee' | 'kettle' | 'microwave' | 'washer'
-  | 'router' | 'speaker' | 'gamepad' | 'phone' | 'plug';
+export type ApplianceProfileName = DeviceIconId;
 export type EventCause = 'user' | 'schedule' | 'driver' | 'system';
 export type NotificationSeverity = 'info' | 'warning' | 'critical';
 export type EnergyUnit = 'kWh' | 'Wh';
 export type TimeFormat = '12h' | '24h';
+export type TariffMode = 'egypt' | 'flat';
 export type ThemePreference = 'light' | 'dark' | 'system';
 export type PowerRange = 'day' | 'week' | 'month' | '7d' | '30d' | '90d' | 'all';
+
+export interface StripTelemetryDTO {
+  fw: string;
+  voltageV: number | null;
+  currentA: number | null;
+  rssi: number | null;
+  totalEnergyKwh: number;
+  outlets: Array<{ relayIndex: number; energyKwh: number; temperatureC: number }>;
+}
 
 export interface RelayDTO {
   id: string;
@@ -40,6 +47,7 @@ export interface StripDTO {
   relays: RelayDTO[];
   totalWatts: number;
   icon: ApplianceProfileName;
+  telemetry?: StripTelemetryDTO | null;
 }
 
 export interface DiscoveredStripDTO {
@@ -122,6 +130,44 @@ export interface EventDTO {
   createdAt: string;
 }
 
+export interface EnergyReportDTO {
+  stripId: string;
+  days: number;
+  totalKwh: number;
+  previousKwh: number;
+  cost: number;
+  currency: string;
+  ratePerKwh: number;
+  tariff: TariffInfoDTO;
+  daily: Array<{ date: string; kwh: number; cost: number }>;
+  outlets: Array<{ relayIndex: number; name: string; kwh: number; cost: number }>;
+}
+
+export interface TariffInfoDTO {
+  mode: TariffMode;
+  name: string;
+  monthToDateKwh: number;
+  currentLevel: number; // index into levels, -1 when nothing used this month
+  levels: Array<{ label: string; rate: number; service: number }>;
+  note: string;
+}
+
+export type RuleType = 'smart-timer' | 'auto-timer' | 'power-automation' | 'voltage-protection' | 'current-protection';
+export type RuleAction = 'notify' | 'off' | 'both';
+
+export interface RuleDTO {
+  id: string;
+  type: RuleType;
+  stripId: string;
+  relayIndex: number | null; // null = whole strip
+  name: string;
+  enabled: boolean;
+  params: Record<string, unknown>;
+  status: 'idle' | 'waiting' | 'active' | 'tripped';
+  lastTriggeredAt: string | null;
+  createdAt: string;
+}
+
 export interface ScheduleDTO {
   id: string;
   name: string;
@@ -165,6 +211,7 @@ export interface SettingsDTO {
   energyUnit: EnergyUnit;
   currency: string;
   ratePerKwh: number;
+  tariffMode: TariffMode;
   overloadThresholdWatts: number;
   timeFormat: TimeFormat;
 }
@@ -204,6 +251,7 @@ export type ServerWsMessage =
     relays: Array<{ relayIndex: number; watts: number }>;
     totalWatts: number;
     timestamp: string;
+    telemetry?: StripTelemetryDTO | null;
   }
   | { type: 'scan-progress'; scanId: string; percent: number; found: number }
   | { type: 'scan-result'; scanId: string; discovered: DiscoveredStripDTO[] }
@@ -212,4 +260,6 @@ export type ServerWsMessage =
   | { type: 'strip-removed'; stripId: string }
   | { type: 'event-logged'; event: EventDTO }
   | { type: 'notification'; notification: NotificationDTO }
-  | { type: 'schedule-fired'; scheduleId: string; stripId: string };
+  | { type: 'schedule-fired'; scheduleId: string; stripId: string }
+  | { type: 'rules-changed' }
+  | { type: 'settings-changed'; settings: SettingsDTO };

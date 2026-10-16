@@ -139,11 +139,10 @@ object WifiHelper {
         val appContext = context.applicationContext
 
         repeat(attempts.coerceAtLeast(1)) { attempt ->
-            val found = readStripScanResults(wm)
-            if (found.isNotEmpty()) return found
-
+            // Always scan first: returning the cached list is what made new strips invisible
+            // until the system Wi-Fi page forced a fresh scan.
             // Android 9+ throttles foreground scans to 4 per 2 minutes; startScan() returning
-            // false means the request was dropped, so don't just blindly delay — wait for the
+            // false means the request was dropped, so wait for the
             // SCAN_RESULTS_AVAILABLE_ACTION broadcast (fired for scans triggered by anyone,
             // including the system itself) instead of polling on a fixed timer.
             val deferred = CompletableDeferred<Unit>()
@@ -173,25 +172,34 @@ object WifiHelper {
             } finally {
                 runCatching { appContext.unregisterReceiver(receiver) }
             }
+            val found = readStripScanResults(context, wm)
+            if (found.isNotEmpty()) return found
         }
-        return readStripScanResults(wm)
+        return readStripScanResults(context, wm)
     }
 
-    private fun readStripScanResults(wm: WifiManager): List<WifiScanResult> = try {
-        @Suppress("DEPRECATION")
-        wm.scanResults.orEmpty()
-            .asSequence()
-            .filter { it.SSID.startsWith(STRIP_SSID_PREFIX) || it.SSID == STANDALONE_SSID }
-            .map {
-                val type = if (it.SSID == STANDALONE_SSID) StripApType.STANDALONE else StripApType.STOCK
-                WifiScanResult(it.SSID, it.level, type)
-            }
+    private fun readStripScanResults(context: Context, wm: WifiManager): List<WifiScanResult> {
+        val scanned = try {
+            @Suppress("DEPRECATION")
+            wm.scanResults.orEmpty()
+                .asSequence()
+                .filter { it.SSID.startsWith(STRIP_SSID_PREFIX) || it.SSID == STANDALONE_SSID }
+                .map { WifiScanResult(it.SSID, it.level, stripApTypeOf(it.SSID)) }
+                .toList()
+        } catch (_: Exception) {
+            emptyList()
+        }
+        // A phone already joined to a strip AP often doesn't list it in scan results.
+        val current = getCurrentSsid(context)
+            .takeIf { it.startsWith(STRIP_SSID_PREFIX) || it == STANDALONE_SSID }
+            ?.let { WifiScanResult(it, 0, stripApTypeOf(it)) }
+        return (scanned + listOfNotNull(current))
             .distinctBy { it.ssid }
             .sortedByDescending { it.rssi }
-            .toList()
-    } catch (_: Exception) {
-        emptyList()
     }
+
+    private fun stripApTypeOf(ssid: String) =
+        if (ssid == STANDALONE_SSID) StripApType.STANDALONE else StripApType.STOCK
 
     /**
      * Connects the phone to the strip AP (Android 10+) and returns the bound Network,
@@ -301,11 +309,12 @@ object WifiHelper {
         onLost: ((fastRoamBack: Boolean) -> Unit)? = null,
     ): Network? {
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val net = cm.activeNetwork ?: return null
-        val caps = cm.getNetworkCapabilities(net) ?: return null
-        if (!caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return null
-        val currentSsid = wifiSsidOf(caps)
-        if (currentSsid.isBlank() || currentSsid != ssid) return null
+        // Not activeNetwork: with mobile data up (Huawei Wi-Fi+), the no-internet strip AP is never the default.
+        if (getCurrentSsid(context) != ssid) return null
+        @Suppress("DEPRECATION")
+        val net = cm.allNetworks.firstOrNull {
+            cm.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+        } ?: return null
 
         // Clear any stale registration before taking over bookkeeping for this network.
         releaseStripNetwork(context)
@@ -344,17 +353,6 @@ object WifiHelper {
         runCatching { cm.registerNetworkCallback(request, cb) }
         return net
     }
-
-    /**
-     * `NetworkCapabilities.getTransportInfo` only exists from API 29, so reading it unguarded is a
-     * `NoSuchMethodError` on the older devices this app still installs on.
-     */
-    private fun wifiSsidOf(caps: NetworkCapabilities): String =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            (caps.transportInfo as? android.net.wifi.WifiInfo)?.ssid.orEmpty().removeSurrounding("\"")
-        } else {
-            ""
-        }
 
     /**
      * Pre-Android-10 join, mirroring the vendor app's non-specifier branch: write a

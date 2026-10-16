@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { ApplianceProfileName, ConnectivityState, DiscoveredStripDTO, RelayStateValue, RelayTimerDTO, RelayTimerMode, StripDTO } from '@shared/types';
+import type { ApplianceProfileName, ConnectivityState, DiscoveredStripDTO, RelayStateValue, RelayTimerDTO, RelayTimerMode, StripDTO, StripTelemetryDTO } from '@shared/types';
 import { api } from '../lib/apiClient';
 
 export interface RelayTimerState {
@@ -29,6 +29,7 @@ interface FleetState {
   removeStrip: (stripId: string) => Promise<void>;
   renameStrip: (stripId: string, name: string) => Promise<void>;
   setStripIcon: (stripId: string, icon: ApplianceProfileName) => Promise<void>;
+  setStripLocation: (stripId: string, location: string | null) => Promise<void>;
   renameRelay: (stripId: string, relayIndex: number, name: string) => Promise<void>;
   setRelayIcon: (stripId: string, relayIndex: number, icon: ApplianceProfileName) => Promise<void>;
   setRelay: (stripId: string, relayIndex: number, state: RelayStateValue) => Promise<void>;
@@ -37,7 +38,7 @@ interface FleetState {
   applyRelayTimer: (stripId: string, relayIndex: number, timer: RelayTimerState | null) => void;
   setAllRelays: (stripId: string, state: RelayStateValue) => Promise<void>;
   applyRelayState: (stripId: string, relayIndex: number, state: RelayStateValue, changedAt: string) => void;
-  applyPowerTick: (stripId: string, relays: Array<{ relayIndex: number; watts: number }>, totalWatts: number) => void;
+  applyPowerTick: (stripId: string, relays: Array<{ relayIndex: number; watts: number }>, totalWatts: number, telemetry?: StripTelemetryDTO | null) => void;
   applyConnectivity: (stripId: string, connectivity: ConnectivityState) => void;
   applyStripUpdated: (strip: StripDTO) => void;
   applyStripAdded: (strip: StripDTO) => void;
@@ -93,6 +94,11 @@ export const useFleetStore = create<FleetState>((set, get) => ({
     set({ strips: updateStrip(get().strips, stripId, () => strip) });
   },
 
+  setStripLocation: async (stripId, location) => {
+    const { strip } = await api.patch<{ strip: StripDTO }>(`/strips/${stripId}`, { location });
+    set({ strips: updateStrip(get().strips, stripId, () => strip) });
+  },
+
   renameRelay: async (stripId, relayIndex, name) => {
     const { strip } = await api.patch<{ strip: StripDTO }>(`/strips/${stripId}/relays/${relayIndex}`, { name });
     set({ strips: updateStrip(get().strips, stripId, () => strip) });
@@ -142,11 +148,12 @@ export const useFleetStore = create<FleetState>((set, get) => ({
     });
   },
 
-  applyPowerTick: (stripId, relays, totalWatts) => {
+  applyPowerTick: (stripId, relays, totalWatts, telemetry) => {
     set({
       strips: updateStrip(get().strips, stripId, (strip) => ({
         ...strip,
         totalWatts,
+        telemetry: telemetry ?? strip.telemetry,
         relays: strip.relays.map((r) => {
           const match = relays.find((x) => x.relayIndex === r.index);
           return match ? { ...r, watts: match.watts } : r;

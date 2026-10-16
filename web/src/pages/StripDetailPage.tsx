@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Settings2 } from 'lucide-react';
 import { AllOnAllOffButtons } from '../components/strips/AllOnAllOffButtons';
 import { ConnectivityBadge } from '../components/strips/ConnectivityBadge';
 import { RelayToggle } from '../components/strips/RelayToggle';
@@ -82,7 +83,12 @@ export default function StripDetailPage() {
                 </p>
               </div>
             </div>
-            <ConnectivityBadge connectivity={strip.connectivity} />
+            <div className="flex items-center gap-2">
+              <Link to={`/strips/${strip.id}/settings`} aria-label="Strip settings" title="Automations, energy and protection" className="rounded-lg p-1.5 text-text-muted hover:bg-surface-hover hover:text-primary">
+                <Settings2 size={18} />
+              </Link>
+              <ConnectivityBadge connectivity={strip.connectivity} />
+            </div>
           </div>
 
           <div className="flex items-end justify-between gap-3">

@@ -81,10 +81,9 @@ fun ScanScreen(onStripAdopted: () -> Unit) {
 
     LazyColumn(
         Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(18.dp),
+        contentPadding = PaddingValues(vertical = 4.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item { ScreenTitle(stringResource(R.string.scan_title), stringResource(R.string.scan_body)) }
         item {
             FilledTonalButton(onClick = { startScan() }, enabled = !scanning, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Filled.Refresh, null)

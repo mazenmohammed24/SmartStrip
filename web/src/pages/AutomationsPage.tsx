@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import type { ScheduleDTO } from '@shared/types';
 import { Button } from '../components/ui/Button';
 import { Card, CardBody } from '../components/ui/Card';
@@ -36,6 +37,8 @@ function timeToDisplay(time: string, format: '12h' | '24h'): string {
 
 export default function AutomationsPage() {
   const strips = useFleetStore((s) => s.strips);
+  const [searchParams] = useSearchParams();
+  const filterStripId = searchParams.get('stripId');
   const timeFormat = useSettingsStore((s) => s.settings?.timeFormat ?? '24h');
   const [schedules, setSchedules] = useState<ScheduleDTO[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,11 +51,14 @@ export default function AutomationsPage() {
     setLoading(false);
   };
 
+  const fetchStrips = useFleetStore((s) => s.fetchStrips);
+
   useEffect(() => {
     void load();
-  }, []);
+    void fetchStrips();
+  }, [fetchStrips]);
 
-  const openCreate = () => setForm(emptyForm(strips[0]?.id ?? ''));
+  const openCreate = () => setForm(emptyForm(filterStripId ?? strips[0]?.id ?? ''));
   const openEdit = (s: ScheduleDTO) =>
     setForm({ id: s.id, name: s.name, stripId: s.stripId, relayIndex: s.relayIndex, action: s.action, time: s.time, daysOfWeek: s.daysOfWeek });
 
@@ -100,16 +106,17 @@ export default function AutomationsPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between gap-2">
+        {filterStripId ? <Link to={`/strips/${filterStripId}/settings`} className="text-sm text-primary hover:underline">← Strip settings</Link> : <span />}
         <Button onClick={openCreate}>New automation</Button>
       </div>
 
-      {!loading && schedules.length === 0 && (
+      {!loading && !schedules.some((s) => !filterStripId || s.stripId === filterStripId) && (
         <EmptyState icon={<span>⏱️</span>} title="No automations yet" description="Create time-based rules to turn outlets on or off automatically." />
       )}
 
       <div className="flex flex-col gap-3">
-        {schedules.map((s) => {
+        {schedules.filter((s) => !filterStripId || s.stripId === filterStripId).map((s) => {
           const strip = strips.find((x) => x.id === s.stripId);
           const target =
             s.relayIndex === null ? 'All outlets' : (strip?.relays.find((r) => r.index === s.relayIndex)?.name ?? `Outlet ${s.relayIndex + 1}`);

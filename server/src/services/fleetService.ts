@@ -1,10 +1,11 @@
-import type { DiscoveredStripDTO, EventCause, RelayStateValue, StripDTO } from '../../../shared/types.js';
+import type { DiscoveredStripDTO, EventCause, RelayStateValue, StripDTO, StripTelemetryDTO } from '../../../shared/types.js';
 import { getMainDb } from '../db/mainDb.js';
 import type { StoredRelay, StoredStrip } from '../db/schema.js';
 import type { DiscoveredStrip, ScanOptions, StripDriver, StripDriverEvent } from '../drivers/StripDriver.js';
 import { newId } from '../utils/id.js';
 import { createLogger } from '../utils/logger.js';
 import { broadcast } from '../ws/broadcast.js';
+import { deleteRulesForStrip } from './ruleService.js';
 import { logEvent } from './eventService.js';
 import { notify } from './notificationService.js';
 import { recordTick } from './powerService.js';
@@ -15,6 +16,13 @@ const ICON_ROTATION = ['lamp', 'charger', 'fridge', 'heater'] as const;
 // relayIndex -> watts, per DB strip id. Populated from driver 'status' ticks,
 // never persisted directly (power history is derived via powerService rollups).
 const liveWatts = new Map<string, Map<number, number>>();
+const liveTelemetry = new Map<string, StripTelemetryDTO>();
+const lastOverloadAt = new Map<string, number>();
+const OVERLOAD_COOLDOWN_MS = 10 * 60_000;
+
+export function getLiveTelemetry(stripId: string): StripTelemetryDTO | null {
+  return liveTelemetry.get(stripId) ?? null;
+}
 
 export function getLiveWattsForStrip(stripId: string): { relays: Map<number, number>; total: number } {
   const relays = liveWatts.get(stripId) ?? new Map();
@@ -56,6 +64,7 @@ function toStripDTO(strip: StoredStrip, relays: StoredRelay[]): StripDTO {
     relays: relayDTOs,
     totalWatts: round2(relayDTOs.reduce((a, r) => a + r.watts, 0)),
     icon: strip.icon ?? 'power-strip',
+    telemetry: liveTelemetry.get(strip.id) ?? null,
   };
 }
 
@@ -165,6 +174,7 @@ export async function removeStrip(driver: StripDriver, stripId: string): Promise
   db.data.relays = db.data.relays.filter((r) => r.stripId !== stripId);
   await db.write();
   liveWatts.delete(stripId);
+  await deleteRulesForStrip(stripId);
   await logEvent({
     type: 'strip-removed',
     stripId: null,
@@ -266,7 +276,33 @@ export async function setAllRelays(driver: StripDriver, stripId: string, state: 
 export function wireDriverEvents(driver: StripDriver): void {
   driver.onEvent((event) => {
     void handleDriverEvent(event).catch((err) => log.error('driver event handling failed', err));
+    if (event.type === 'connectivity' && event.connectivity === 'online') {
+      void autoAdoptStrip(driver, event.driverStripId).catch((err) => log.warn('auto-registration failed', err));
+    }
   });
+}
+
+const PRIVATE_IPV4 = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/;
+
+/** Registers a strip that dialled in from the LAN but isn't in the fleet yet (e.g. right after provisioning). */
+async function autoAdoptStrip(driver: StripDriver, driverStripId: string): Promise<void> {
+  const db = getMainDb();
+  if (db.data.strips.some((s) => s.driverStripId === driverStripId)) return;
+  const found = (await driver.scanForStrips({ timeoutMs: 100 })).find((d) => d.driverStripId === driverStripId);
+  if (!found) return;
+  if (!PRIVATE_IPV4.test((found.ipAddress ?? '').replace(/^::ffff:/, ''))) return;
+  try {
+    const strip = await adoptStrip(driver, {
+      driverStripId: found.driverStripId,
+      model: found.model,
+      relayCount: found.relayCount,
+      ipAddress: found.ipAddress,
+      suggestedName: found.suggestedName,
+    });
+    log.info(`auto-registered ${strip.name} (${found.driverStripId})`);
+  } catch (err) {
+    if (!db.data.strips.some((s) => s.driverStripId === driverStripId)) throw err;
+  }
 }
 
 /**
@@ -287,10 +323,10 @@ export async function resyncDriverState(driver: StripDriver): Promise<void> {
           (candidate) => candidate.stripId === strip.id && candidate.index === snapshotRelay.relayIndex,
         );
         if (!relay) continue;
+        if (relay.state !== snapshotRelay.state) relay.lastChangedAt = status.timestamp;
         relay.state = snapshotRelay.state;
         const cloudName = status.relayNames?.[snapshotRelay.relayIndex];
         if (cloudName && isDefaultOutletName(relay.name, relay.index)) relay.name = cloudName;
-        relay.lastChangedAt = status.timestamp;
       }
     } catch (err) {
       log.warn(`could not resync strip ${strip.name} (${strip.driverStripId}) with driver`, err);
@@ -307,25 +343,32 @@ async function handleDriverEvent(event: StripDriverEvent): Promise<void> {
     const strip = db.data.strips.find((s) => s.driverStripId === event.snapshot.driverStripId);
     if (!strip) return;
     const map = new Map<number, number>();
+    const flipped: Array<{ relayIndex: number; state: RelayStateValue; changedAt: string }> = [];
     for (const r of event.snapshot.relays) {
       map.set(r.relayIndex, r.watts);
       const relay = db.data.relays.find((candidate) => candidate.stripId === strip.id && candidate.index === r.relayIndex);
       if (!relay) continue;
+      if (relay.state !== r.state) {
+        relay.lastChangedAt = event.snapshot.timestamp;
+        flipped.push({ relayIndex: r.relayIndex, state: r.state, changedAt: relay.lastChangedAt });
+      }
       relay.state = r.state;
       const cloudName = event.snapshot.relayNames?.[r.relayIndex];
       if (cloudName && isDefaultOutletName(relay.name, relay.index)) relay.name = cloudName;
-      relay.lastChangedAt = event.snapshot.timestamp;
     }
     strip.connectivity = event.snapshot.connectivity;
     await db.write();
     liveWatts.set(strip.id, map);
+    if (event.snapshot.telemetry) liveTelemetry.set(strip.id, event.snapshot.telemetry);
     recordTick(event.snapshot.relays.map((r) => ({ stripId: strip.id, relayIndex: r.relayIndex, watts: r.watts })));
+    for (const f of flipped) broadcast({ type: 'relay-state', stripId: strip.id, ...f });
     broadcast({
       type: 'power-tick',
       stripId: strip.id,
       relays: event.snapshot.relays,
       totalWatts: event.snapshot.totalWatts,
       timestamp: event.snapshot.timestamp,
+      telemetry: event.snapshot.telemetry ?? null,
     });
     return;
   }
@@ -392,6 +435,10 @@ async function handleDriverEvent(event: StripDriverEvent): Promise<void> {
   }
 
   if (event.type === 'overload') {
+    const key = `${event.driverStripId}:${event.relayIndex}`;
+    const lastAt = lastOverloadAt.get(key) ?? 0;
+    if (Date.now() - lastAt < OVERLOAD_COOLDOWN_MS) return;
+    lastOverloadAt.set(key, Date.now());
     const strip = db.data.strips.find((s) => s.driverStripId === event.driverStripId);
     if (!strip) return;
     const relay = db.data.relays.find((r) => r.stripId === strip.id && r.index === event.relayIndex);

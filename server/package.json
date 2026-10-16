@@ -6,7 +6,7 @@
   "main": "dist/server/src/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node -e \"require('fs').copyFileSync('../shared/package.json','dist/shared/package.json')\"",
     "start": "node dist/server/src/index.js",
     "generate-vapid-keys": "node scripts/generate-vapid-keys.mjs",
     "seed-demo-history": "tsx scripts/seed-demo-history.ts",

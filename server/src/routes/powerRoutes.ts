@@ -1,4 +1,4 @@
-﻿import { Router } from 'express';
+import { Router } from 'express';
 import { z } from 'zod';
 import { getDriver } from '../drivers/DriverRegistry.js';
 import * as fleetService from '../services/fleetService.js';
@@ -46,4 +46,26 @@ powerRoutes.get('/summary', (req, res) => {
   }
   const { total } = fleetService.getLiveWattsForStrip(stripId);
   res.json(powerService.getSummary(stripId, total));
+});
+
+powerRoutes.get('/energy', (req, res) => {
+  const stripId = String(req.query.stripId ?? '');
+  const strip = stripId ? fleetService.getStrip(stripId) : null;
+  if (!strip) {
+    res.status(404).json({ error: 'Strip not found' });
+    return;
+  }
+  const days = Math.min(365, Math.max(1, Math.round(Number(req.query.days ?? 7)) || 7));
+  const names = new Map(strip.relays.map((r) => [r.index, r.name] as [number, string]));
+  res.json(powerService.getEnergyReport(strip.id, days, names));
+});
+
+powerRoutes.delete('/energy', async (req, res) => {
+  const stripId = String(req.query.stripId ?? '');
+  if (!stripId || !fleetService.getStrip(stripId)) {
+    res.status(404).json({ error: 'Strip not found' });
+    return;
+  }
+  await powerService.resetEnergy(stripId);
+  res.json({ ok: true });
 });

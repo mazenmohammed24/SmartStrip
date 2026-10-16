@@ -1,7 +1,9 @@
+import type { ReactNode } from 'react';
 import type { MttlStripTelemetry } from '@shared/types';
 import { Card, CardBody, CardHeader } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { formatKwh, formatWatts } from '../../lib/formatters';
+import { WifiBars } from './WifiBars';
 
 /**
  * Hardware readings that only the strip itself reports: line voltage, current,
@@ -23,7 +25,7 @@ export function TelemetryCard({ telemetry }: { telemetry: MttlStripTelemetry | n
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <Metric label="Voltage" value={telemetry.voltageV !== null ? `${telemetry.voltageV} V` : '—'} />
           <Metric label="Current" value={telemetry.currentA !== null ? `${telemetry.currentA} A` : '—'} />
-          <Metric label="Wi-Fi" value={telemetry.rssi !== null ? `${telemetry.rssi} dBm` : '—'} />
+          <Metric label="Wi-Fi" value={<WifiBars rssi={telemetry.rssi} size={18} />} />
           <Metric label="Lifetime" value={formatKwh(telemetry.totalEnergyKwh)} />
         </div>
 
@@ -49,11 +51,11 @@ export function TelemetryCard({ telemetry }: { telemetry: MttlStripTelemetry | n
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function Metric({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="rounded-xl bg-surface-alt px-3 py-2">
       <p className="text-xs text-text-muted">{label}</p>
-      <p className="text-sm font-semibold tabular-nums text-text">{value}</p>
+      <div className="flex h-5 items-center text-sm font-semibold tabular-nums text-text">{value}</div>
     </div>
   );
 }

@@ -1,4 +1,5 @@
-﻿import { Router } from 'express';
+import { DEVICE_ICON_IDS } from '../../../shared/deviceIcons.js';
+import { Router } from 'express';
 import { z } from 'zod';
 import { getDriver } from '../drivers/DriverRegistry.js';
 import * as fleetService from '../services/fleetService.js';
@@ -67,7 +68,7 @@ const updateStripSchema = z.object({
   name: z.string().min(1).max(64).optional(),
   location: z.string().max(64).nullable().optional(),
   order: z.number().int().min(0).optional(),
-  icon: z.enum(['power-strip', 'lamp', 'charger', 'fridge', 'heater', 'idle', 'computer', 'laptop', 'monitor', 'printer', 'tv', 'fan', 'air-conditioner', 'coffee', 'kettle', 'microwave', 'washer', 'router', 'speaker', 'gamepad', 'phone', 'plug']).optional(),
+  icon: z.enum(DEVICE_ICON_IDS).optional(),
 });
 
 stripsRoutes.patch('/:id', async (req, res) => {
@@ -114,7 +115,7 @@ stripsRoutes.post('/:id/relays/all-off', async (req, res) => {
 const relayPatchSchema = z.object({
   state: z.enum(['on', 'off']).optional(),
   name: z.string().min(1).max(48).optional(),
-  icon: z.enum(['power-strip', 'lamp', 'charger', 'fridge', 'heater', 'idle', 'computer', 'laptop', 'monitor', 'printer', 'tv', 'fan', 'air-conditioner', 'coffee', 'kettle', 'microwave', 'washer', 'router', 'speaker', 'gamepad', 'phone', 'plug']).optional(),
+  icon: z.enum(DEVICE_ICON_IDS).optional(),
 });
 
 const relayTimerSchema = z.object({

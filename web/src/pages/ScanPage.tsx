@@ -19,6 +19,10 @@ interface ScanRecord {
 }
 
 export default function ScanPage() {
+  return <ScanPanel />;
+}
+
+export function ScanPanel({ onAdopted }: { onAdopted?: () => void }) {
   const strips = useFleetStore((s) => s.strips);
   const adoptStrip = useFleetStore((s) => s.adoptStrip);
   const fetchMttlStatus = useMttlStore((s) => s.fetchStatus);
@@ -88,6 +92,7 @@ export default function ScanPage() {
     try {
       await adoptStrip({ ...adopting, name: nameDraft, location: locationDraft || null });
       setAdopting(null);
+      onAdopted?.();
     } finally {
       setSaving(false);
     }

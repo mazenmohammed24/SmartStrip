@@ -14,23 +14,16 @@ import com.powerk.app.Server
 import com.powerk.app.StripApType
 import com.powerk.app.WifiHelper
 import com.powerk.app.WifiScanResult
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Holds the Wi-Fi provisioning wizard's state and runs the connect+send+wait flow in
- * [viewModelScope] instead of a `SettingsScreen`-composable-scoped `rememberCoroutineScope()`.
- *
- * This fixes a real bug: Jetpack Navigation-Compose disposes a destination's composition (and
- * cancels any coroutine launched via `rememberCoroutineScope()`) the instant the user navigates
- * to another route — even a single stray tap on another bottom-nav tab while the strip-AP
- * connect/send/wait sequence is in flight. That silently aborted the wizard with no error shown,
- * which is what made the "connect" dialog look like it "didn't actually connect and disconnected
- * right after". Because this ViewModel is obtained via `viewModel()` it is scoped to the Settings
- * destination's back-stack entry, which survives tab switches (the entry is only cleared when
- * popped off the back stack), so the in-flight work now keeps running even if the user briefly
- * looks at another tab.
+ * [viewModelScope] (not a composable-scoped `rememberCoroutineScope()`) so it survives
+ * Navigation-Compose disposing the Settings destination on a stray tab switch mid-flow.
  */
 class ProvisionViewModel(application: Application) : AndroidViewModel(application) {
     var showWizard by mutableStateOf(false)
@@ -55,6 +48,29 @@ class ProvisionViewModel(application: Application) : AndroidViewModel(applicatio
     private val ctx get() = getApplication<Application>()
     private var keepAliveJob: Job? = null
 
+    // Persists home Wi-Fi SSID/password across app restarts; cleared only by resetWizard().
+    private val provisionPrefs get() = ctx.getSharedPreferences("powerk_provision", android.content.Context.MODE_PRIVATE)
+
+    init {
+        provisionSsid = provisionPrefs.getString(PREF_SSID, "").orEmpty()
+        provisionPassword = provisionPrefs.getString(PREF_PASSWORD, "").orEmpty()
+    }
+
+    private fun persistWifiCredentials() {
+        provisionPrefs.edit()
+            .putString(PREF_SSID, provisionSsid)
+            .putString(PREF_PASSWORD, provisionPassword)
+            .apply()
+    }
+
+    private fun clearPersistedWifiCredentials() {
+        provisionPrefs.edit().remove(PREF_SSID).remove(PREF_PASSWORD).apply()
+    }
+
+    // Controller IP the strip reports back to on port 10086; must be resolved while still on
+    // home Wi-Fi, before joining the strip's isolated setup AP.
+    private var resolvedControllerIp: String? = null
+
     /** Prefills [provisionSsid] from the currently-connected home Wi-Fi, if any. */
     fun prefillSsidFromCurrentWifi() {
         val ssid = WifiHelper.getCurrentSsid(ctx)
@@ -63,13 +79,26 @@ class ProvisionViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    // Leaves step 0 for step 1, kicking off controller IP resolution now while still on normal Wi-Fi.
+    fun advanceToStripSelection() {
+        persistWifiCredentials()
+        provisionStep = 1
+        if (resolvedControllerIp == null) {
+            viewModelScope.launch {
+                resolvedControllerIp = runCatching {
+                    withContext(Dispatchers.IO) { Api.provisionAddressFromServer(Server.base, Server.token).ip }
+                }.getOrNull()
+            }
+        }
+    }
+
     fun doScan(hasPermissions: Boolean, onNeedPermission: () -> Unit) {
         if (!hasPermissions) {
             onNeedPermission()
             return
         }
-        // Android reports an empty scan result list - not an error - while location services are
-        // off, so surface the real cause instead of the misleading "no strip APs found".
+        // Android reports an empty scan list (not an error) when location services are off, so
+        // surface the real cause instead of a misleading "no strip APs found".
         locationEnabled = WifiHelper.isLocationEnabled(ctx)
         if (!locationEnabled) {
             stripNetworks = emptyList()
@@ -107,14 +136,14 @@ class ProvisionViewModel(application: Application) : AndroidViewModel(applicatio
         provisionStatus = null
         provisionOk = false
         provisionPassword = ""
+        clearPersistedWifiCredentials()
         foundStripIp = null
+        resolvedControllerIp = null
         showWizard = false
     }
 
-    // Keep the strip AP connection alive while the wizard needs it (steps 1-2): periodically
-    // re-affirm connectivity/binding so Android/OEM power management doesn't silently drop it.
-    // Runs in viewModelScope so it keeps going even if the Settings screen briefly leaves
-    // composition (e.g. the user taps another bottom-nav tab).
+    // Keeps the strip AP connection alive during steps 1-2 so Android/OEM power management
+    // doesn't silently drop it; runs in viewModelScope to survive tab switches.
     private fun startKeepAlive() {
         keepAliveJob?.cancel()
         keepAliveJob = viewModelScope.launch {
@@ -130,26 +159,27 @@ class ProvisionViewModel(application: Application) : AndroidViewModel(applicatio
         keepAliveJob = null
     }
 
-    // Sends the home Wi-Fi credentials and waits for registration. Called directly (not via a
-    // separate viewModelScope.launch) from the connect success path so it runs in the same
-    // coroutine with no extra scheduling gap — every millisecond matters here, since some OEM
-    // Wi-Fi managers (e.g. Huawei's WifiPro) silently roam the radio back off the strip AP within
-    // ~100-900ms of it becoming "available", regardless of any user-visible Wi-Fi+ toggle.
+    // Runs inline (not a separate launch) so no scheduling gap delays sending credentials, since
+    // some OEM Wi-Fi managers roam off the strip AP within ~100-900ms of it connecting.
     private suspend fun sendWifiAndWait() {
         provisionBusy = true
         provisionStep = 2
         provisionStatus = ctx.getString(R.string.provision_sending)
         val standalone = selectedStrip?.type == StripApType.STANDALONE
         try {
-            // Keep process-wide binding as a fallback, but configureStripWifi now also binds its
-            // own socket/connection directly to boundStripNetwork, which is the part that
-            // actually matters if an OEM Wi-Fi manager changes the process-wide default mid-race.
+            // configureStripWifi also binds its own socket directly to boundStripNetwork, which
+            // matters more than this process-wide fallback.
             boundStripNetwork?.let { WifiHelper.bindProcessToNetwork(ctx, it) }
+            // Prefer the background-resolved address from advanceToStripSelection; fall back to
+            // the local computation if that probe hasn't finished.
+            val controllerIp = resolvedControllerIp
+                ?: withContext(Dispatchers.IO) { Api.resolveServerAddressForStrip(Server.base).ip }
             Api.configureStripWifi(
                 ssid = provisionSsid.trim(),
                 password = provisionPassword,
                 standalone = standalone,
                 network = boundStripNetwork,
+                controllerIp = controllerIp,
             )
             stopKeepAlive()
             WifiHelper.releaseStripNetwork(ctx)
@@ -182,14 +212,11 @@ class ProvisionViewModel(application: Application) : AndroidViewModel(applicatio
         provisionStep = 3
     }
 
-    // Connects to the selected strip AP and immediately sends the already-collected Wi-Fi
-    // credentials. Extracted so both the step-1 button and the step-3 "Retry" button (which
-    // keeps all entered data and just re-attempts the race) can trigger the exact same flow.
+    // Connects to the selected strip AP and sends Wi-Fi immediately; shared by the step-1 button
+    // and the step-3 "Retry" button.
     fun attemptConnectAndSend() {
         val strip = selectedStrip ?: return
-        // Reject credentials the strip could never join before spending the brief connectivity
-        // window on a connect, send and wait that is guaranteed to end in a strip that never
-        // registers. See WifiHelper.homeWifiValidationError.
+        // Reject credentials the strip could never join before spending the brief connectivity window.
         WifiHelper.homeWifiValidationError(provisionSsid, provisionPassword)?.let { problem ->
             provisionStatus = problem
             provisionOk = false
@@ -201,20 +228,13 @@ class ProvisionViewModel(application: Application) : AndroidViewModel(applicatio
         provisionOk = false
         provisionStatus = ctx.getString(R.string.provision_connecting_strip, strip.ssid)
 
-        // Shared between the "already connected" fast path and the normal connect-request path
-        // below, so both react to a dropped connection the same way.
+        // Shared by the "already connected" fast path and the normal connect-request path below.
         val onLost: (Boolean) -> Unit = { fastRoamBack ->
-            // Only react while still in the "connecting" sub-phase (provisionStep == 1, before
-            // sendWifiAndWait has moved us to step 2). Once sending has started, ignore onLost
-            // entirely and let the send's own try/catch decide success/failure — resetting here
-            // too would race with it.
+            // Ignore once sendWifiAndWait has moved us past step 1 - its own try/catch owns success/failure then.
             if (provisionStep == 1) {
                 if (fastRoamBack) {
-                    // The OS instantly roamed back to a known network (e.g. Huawei Wi-Fi+).
-                    // Retrying immediately would just pop another system dialog in a loop —
-                    // surface guidance and let the user retry manually instead. Unregister the
-                    // callback now: leaving it registered keeps the system "connect to network"
-                    // dialog reappearing to try to re-satisfy the dead request.
+                    // OS instantly roamed back to a known network; unregister and let the user retry
+                    // manually instead of looping another system dialog.
                     stopKeepAlive()
                     WifiHelper.releaseStripNetwork(ctx)
                     reconnecting = false
@@ -238,9 +258,7 @@ class ProvisionViewModel(application: Application) : AndroidViewModel(applicatio
                             provisionOk = false
                             provisionStatus = "Reconnection to strip AP failed. Move closer and try again."
                         } else {
-                            // Reconnected — send immediately, same as
-                            // the initial success path, to stay inside
-                            // the brief connectivity window.
+                            // Reconnected — send immediately to stay inside the connectivity window.
                             boundStripNetwork = recon
                             provisionOk = true
                             startKeepAlive()
@@ -252,13 +270,8 @@ class ProvisionViewModel(application: Application) : AndroidViewModel(applicatio
         }
 
         viewModelScope.launch {
-            // If the phone is already connected to the strip AP — e.g. connected manually via
-            // system Wi-Fi settings, or left over from a previous attempt — reuse that network
-            // instead of issuing a brand-new connect request. A fresh WifiNetworkSpecifier
-            // request always pops the system "connect to this network?" dialog even when
-            // already associated, and accepting it tears down and re-establishes the link —
-            // which is exactly what made Connect/Retry look like it "asks to connect, then
-            // disconnects right away" when the phone was already on the strip's hotspot.
+            // Reuse the network if already connected to the strip AP - a fresh connect request
+            // pops the system dialog and tears down/re-establishes the link even when already associated.
             val network = WifiHelper.reuseIfAlreadyConnected(ctx, strip.ssid, onLost)
                 ?: WifiHelper.connectToStripAp(context = ctx, ssid = strip.ssid, onLost = onLost)
             connectingAp = false
@@ -270,9 +283,7 @@ class ProvisionViewModel(application: Application) : AndroidViewModel(applicatio
                 boundStripNetwork = network
                 provisionOk = true
                 startKeepAlive()
-                // Send the already-collected home Wi-Fi credentials right away,
-                // in the same coroutine, to minimize the gap between the strip
-                // AP becoming available and the setup request reaching it.
+                // Send immediately, same coroutine, to minimize the gap before the strip AP drops.
                 sendWifiAndWait()
             }
         }
@@ -282,5 +293,10 @@ class ProvisionViewModel(application: Application) : AndroidViewModel(applicatio
         stopKeepAlive()
         WifiHelper.releaseStripNetwork(ctx)
         super.onCleared()
+    }
+
+    private companion object {
+        const val PREF_SSID = "last_wifi_ssid"
+        const val PREF_PASSWORD = "last_wifi_password"
     }
 }

@@ -2,9 +2,11 @@ import type {
   ApplianceProfileName,
   ConnectivityState,
   EnergyUnit,
+  TariffMode,
   EventCause,
   NotificationSeverity,
   RelayStateValue,
+  RuleType,
   ThemePreference,
   TimeFormat,
 } from '../../../shared/types.js';
@@ -50,6 +52,18 @@ export interface StoredSchedule {
   createdAt: string;
 }
 
+export interface StoredRule {
+  id: string;
+  type: RuleType;
+  stripId: string;
+  relayIndex: number | null;
+  name: string;
+  enabled: boolean;
+  params: Record<string, unknown>;
+  lastTriggeredAt: string | null;
+  createdAt: string;
+}
+
 export interface StoredRelayTimer {
   stripId: string;
   relayIndex: number;
@@ -87,6 +101,7 @@ export interface StoredSettings {
   energyUnit: EnergyUnit;
   currency: string;
   ratePerKwh: number;
+  tariffMode?: TariffMode;
   overloadThresholdWatts: number;
   timeFormat: TimeFormat;
 }
@@ -95,6 +110,7 @@ export interface MainDbSchema {
   strips: StoredStrip[];
   relays: StoredRelay[];
   schedules: StoredSchedule[];
+  rules: StoredRule[];
   relayTimers: StoredRelayTimer[];
   notifications: StoredNotification[];
   pushSubscriptions: StoredPushSubscription[];
@@ -105,8 +121,9 @@ export const defaultSettings: StoredSettings = {
   theme: 'system',
   accentColor: '#0f766e',
   energyUnit: 'kWh',
-  currency: 'USD',
+  currency: 'EGP',
   ratePerKwh: 0.16,
+  tariffMode: 'egypt',
   overloadThresholdWatts: 1800,
   timeFormat: '24h',
 };
@@ -115,6 +132,7 @@ export const defaultMainDb: MainDbSchema = {
   strips: [],
   relays: [],
   schedules: [],
+  rules: [],
   relayTimers: [],
   notifications: [],
   pushSubscriptions: [],

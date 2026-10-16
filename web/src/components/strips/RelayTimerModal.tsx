@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { RelayStateValue, RelayTimerMode } from '@shared/types';
 import { Clock3, Power, Timer } from 'lucide-react';
 import { Button } from '../ui/Button';
@@ -27,17 +27,28 @@ export function RelayTimerModal({
     onStart: (state: RelayStateValue, durationMinutes: number, mode: RelayTimerMode) => Promise<void>;
     onCancelTimer: () => Promise<void>;
 }) {
+    return (
+        <Modal open={open} onClose={onClose} title={`Timer · ${relayName}`}>
+            <RelayTimerPanel activeTimerLabel={activeTimerLabel} onDone={onClose} onStart={onStart} onCancelTimer={onCancelTimer} />
+        </Modal>
+    );
+}
+
+export function RelayTimerPanel({
+    activeTimerLabel,
+    onDone,
+    onStart,
+    onCancelTimer,
+}: {
+    activeTimerLabel?: string;
+    onDone: () => void;
+    onStart: (state: RelayStateValue, durationMinutes: number, mode: RelayTimerMode) => Promise<void>;
+    onCancelTimer: () => Promise<void>;
+}) {
+    const onClose = onDone;
     const [mode, setMode] = useState<RelayTimerMode>('for');
     const [pending, setPending] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
-
-    // Clear stale feedback whenever the sheet is opened for a different outlet.
-    useEffect(() => {
-        if (open) {
-            setPending(null);
-            setError(null);
-        }
-    }, [open]);
 
     const handleStart = async (state: RelayStateValue, durationMinutes: number) => {
         if (pending) return;
@@ -54,8 +65,7 @@ export function RelayTimerModal({
     };
 
     return (
-        <Modal open={open} onClose={onClose} title={`Timer · ${relayName}`}>
-            <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-4">
                 {activeTimerLabel && (
                     <div className="flex items-center justify-between gap-3 rounded-xl border border-primary bg-success-bg px-3 py-2.5">
                         <div>
@@ -123,8 +133,7 @@ export function RelayTimerModal({
                 />
 
                 {error && <p className="rounded-lg bg-danger-bg px-3 py-2 text-sm text-danger">{error}</p>}
-            </div>
-        </Modal>
+        </div>
     );
 }
 

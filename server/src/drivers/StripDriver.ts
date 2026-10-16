@@ -1,4 +1,4 @@
-import type { ConnectivityState, RelayStateValue } from '../../../shared/types.js';
+import type { ConnectivityState, RelayStateValue, StripTelemetryDTO } from '../../../shared/types.js';
 
 export interface DiscoveredStrip {
   driverStripId: string;
@@ -23,6 +23,7 @@ export interface StripStatusSnapshot {
   totalWatts: number;
   timestamp: string;
   relayNames?: Record<number, string>;
+  telemetry?: StripTelemetryDTO | null;
 }
 
 export type StripDriverEvent =

@@ -63,7 +63,7 @@ object AppTheme {
     const val SYSTEM = "system"
     const val LIGHT = "light"
     const val DARK = "dark"
-    const val DEFAULT_ACCENT = "#1B6B45"
+    const val DEFAULT_ACCENT = "#1AA34A"
 
     var mode by mutableStateOf(SYSTEM)
         private set
@@ -77,12 +77,19 @@ object AppTheme {
         prefs = p
         mode = p.getString("themeMode", SYSTEM).orEmpty().ifBlank { SYSTEM }
             .takeIf { it == SYSTEM || it == LIGHT || it == DARK } ?: SYSTEM
-        accentColor = normalizeColor(p.getString("accentColor", DEFAULT_ACCENT).orEmpty())
+        accentColor = normalizeColor(p.getString("accentColor", DEFAULT_ACCENT).orEmpty()).let { if (it == "#1B6B45") DEFAULT_ACCENT else it }
     }
 
     fun set(value: String) {
         mode = value.takeIf { it == SYSTEM || it == LIGHT || it == DARK } ?: SYSTEM
         prefs?.edit()?.putString("themeMode", mode)?.apply()
+    }
+
+    /** Server is the source of truth; a changed value is persisted so cold starts match. */
+    fun applyRemote(remoteMode: String, remoteAccent: String) {
+        if (remoteMode != mode) set(remoteMode)
+        val next = normalizeColor(remoteAccent)
+        if (next != accentColor) setAccent(next)
     }
 
     fun setAccent(value: String) {

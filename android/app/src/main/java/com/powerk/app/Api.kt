@@ -5,11 +5,18 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import android.util.Log
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.SocketTimeoutException
 import java.net.URL
+import java.nio.charset.StandardCharsets
 
+// ASCII colon-delimited setup-mode protocol, confirmed by three independent sources against the
+// same hardware/firmware (0.1.54-1.0.66): AmrEmad0/MTTL-W01_APP's hardware-tested protocol guide,
+// ttaengz/mttl-w01-matterbridge, and the shipping WattQ app's decompiled strings.
 private const val MTTL_SETUP_HOST = "192.168.1.1"
 private const val MTTL_SETUP_PORT = 30300
 
@@ -20,6 +27,8 @@ data class Outlet(
     val energyKwh: Double,
     val tempC: Int,
     val icon: String,
+    val name: String,
+    val changedAtMs: Long = 0L,
 )
 
 data class Strip(
@@ -35,16 +44,21 @@ data class Strip(
     val currentA: Double?,
     val rssi: Int?,
     val icon: String,
+    val location: String?,
     val outlets: List<Outlet>,
 )
 
-data class Snapshot(val serverIp: String, val strips: List<Strip>)
+data class RelayTimer(val stripId: String, val relayIndex: Int, val mode: String, val state: String, val restoreAtMs: Long)
 data class DiscoveredStrip(val driverStripId: String, val model: String, val suggestedName: String, val ipAddress: String?, val relayCount: Int)
 data class ProvisionResult(val registered: Boolean, val stripName: String?, val message: String)
 data class ServerAddress(val host: String, val ip: String)
 data class PowerSummary(val todayKwh: Double, val todayCost: Double, val currency: String, val liveWatts: Double)
-data class PowerPoint(val bucketStart: String, val avgW: Double, val minW: Double, val maxW: Double, val kwh: Double)
-data class PowerHistory(val range: String, val points: List<PowerPoint>)
+data class DayEnergy(val date: String, val kwh: Double, val cost: Double)
+data class OutletEnergy(val relayIndex: Int, val name: String, val kwh: Double, val cost: Double)
+data class TariffLevel(val label: String, val rate: Double, val service: Double)
+data class TariffInfo(val mode: String, val name: String, val monthToDateKwh: Double, val currentLevel: Int, val levels: List<TariffLevel>, val note: String)
+data class EnergyReport(val days: Int, val totalKwh: Double, val previousKwh: Double, val cost: Double, val currency: String, val ratePerKwh: Double, val tariff: TariffInfo, val daily: List<DayEnergy>, val outlets: List<OutletEnergy>)
+data class RuleItem(val id: String, val type: String, val stripId: String, val relayIndex: Int?, val name: String, val enabled: Boolean, val params: JSONObject, val status: String? = null)
 data class EventItem(val id: String, val type: String, val message: String, val stripName: String?, val createdAt: String)
 data class NotificationItem(val id: String, val title: String, val body: String, val severity: String, val readAt: String?, val createdAt: String)
 data class ScheduleItem(
@@ -62,8 +76,10 @@ data class AppSettings(
     val energyUnit: String,
     val currency: String,
     val ratePerKwh: Double,
+    val tariffMode: String,
     val overloadThresholdWatts: Int,
     val timeFormat: String,
+    val accentColor: String = AppTheme.DEFAULT_ACCENT,
 )
 
 
@@ -77,14 +93,10 @@ class ServerException(message: String) : Exception(message)
 /** Talks to our self-hosted SmartStrip API. */
 object Api {
 
-    suspend fun snapshot(base: String, token: String): Snapshot = withContext(Dispatchers.IO) {
-        val stripsRoot = JSONObject(request("$base/api/strips", null, token))
-        val telemetryByDriverId = runCatching { telemetryMap(base, token) }.getOrDefault(emptyMap())
-        val array = stripsRoot.optJSONArray("strips")
-        val strips = (0 until (array?.length() ?: 0)).map { parseStrip(array!!.getJSONObject(it), telemetryByDriverId) }
-        Snapshot(serverIp(base), strips)
+    suspend fun snapshot(base: String, token: String): List<Strip> = withContext(Dispatchers.IO) {
+        val array = JSONObject(request("$base/api/strips", null, token)).optJSONArray("strips")
+        (0 until (array?.length() ?: 0)).map { parseStrip(array!!.getJSONObject(it)) }
     }
-
     suspend fun setOutlet(base: String, token: String, stripId: String, outlet: Int, on: Boolean) = withContext(Dispatchers.IO) {
         val path = if (outlet == 0) {
             "/api/strips/$stripId/relays/${if (on) "all-on" else "all-off"}"
@@ -92,9 +104,9 @@ object Api {
             "/api/strips/$stripId/relays/${outlet - 1}"
         }
         val body = if (outlet == 0) "{}" else JSONObject().put("state", if (on) "on" else "off").toString()
-        request("$base$path", body, token)
+        val method = if (outlet == 0) null else "PATCH"
+        request("$base$path", body, token, method)
     }
-
 
     suspend fun updateStripIcon(base: String, token: String, stripId: String, icon: String) = withContext(Dispatchers.IO) {
         val body = JSONObject().put("icon", icon).toString()
@@ -108,236 +120,186 @@ object Api {
 
 
 
+    suspend fun updateOutletName(base: String, token: String, stripId: String, outlet: Int, name: String) = withContext(Dispatchers.IO) {
+        val body = JSONObject().put("name", name).toString()
+        request("$base/api/strips/$stripId/relays/${outlet - 1}", body, token, "PATCH")
+    }
+
+    suspend fun startOutletTimer(base: String, token: String, stripId: String, outlet: Int, on: Boolean, minutes: Int, mode: String) = withContext(Dispatchers.IO) {
+        val body = JSONObject().put("state", if (on) "on" else "off").put("durationMinutes", minutes).put("mode", mode).toString()
+        parseTimer(JSONObject(request("$base/api/strips/$stripId/relays/${outlet - 1}/timer", body, token)).getJSONObject("timer"))
+    }
+
+    suspend fun cancelOutletTimer(base: String, token: String, stripId: String, outlet: Int) = withContext(Dispatchers.IO) {
+        request("$base/api/strips/$stripId/relays/${outlet - 1}/timer", null, token, "DELETE")
+    }
+
+    suspend fun activeTimers(base: String, token: String): List<RelayTimer> = withContext(Dispatchers.IO) {
+        JSONObject(request("$base/api/strips/timers/active", null, token)).optJSONArray("timers").toList(::parseTimer)
+    }
+
+    suspend fun outletEvents(base: String, token: String, stripId: String, outlet: Int): List<EventItem> = withContext(Dispatchers.IO) {
+        JSONObject(request("$base/api/events?stripId=$stripId&relayIndex=${outlet - 1}&limit=40", null, token)).optJSONArray("events").toList(::parseEvent)
+    }
+
+    fun parseTimer(x: JSONObject) = RelayTimer(
+        stripId = x.optString("stripId"),
+        relayIndex = x.optInt("relayIndex"),
+        mode = x.optString("mode", "for"),
+        state = x.optString("state", "off"),
+        restoreAtMs = parseIsoMs(x.optString("restoreAt")),
+    )
+
     suspend fun powerSummary(base: String, token: String, stripId: String): PowerSummary = withContext(Dispatchers.IO) {
-
         val o = JSONObject(request("$base/api/power/summary?stripId=$stripId", null, token))
+        PowerSummary(o.optDouble("todayKwh", 0.0), o.optDouble("todayCost", 0.0), o.optString("currency", "USD"), o.optDouble("liveWatts", 0.0))
+    }
 
-        PowerSummary(
-
-            todayKwh = o.optDouble("todayKwh", 0.0),
-
-            todayCost = o.optDouble("todayCost", 0.0),
-
+    suspend fun energy(base: String, token: String, stripId: String, days: Int): EnergyReport = withContext(Dispatchers.IO) {
+        val o = JSONObject(request("$base/api/power/energy?stripId=$stripId&days=$days", null, token))
+        EnergyReport(
+            days = o.optInt("days", days),
+            totalKwh = o.optDouble("totalKwh", 0.0),
+            previousKwh = o.optDouble("previousKwh", 0.0),
+            cost = o.optDouble("cost", 0.0),
             currency = o.optString("currency", "USD"),
-
-            liveWatts = o.optDouble("liveWatts", 0.0),
-
+            ratePerKwh = o.optDouble("ratePerKwh", 0.0),
+            tariff = o.optJSONObject("tariff").let { t ->
+                TariffInfo(
+                    mode = t?.optString("mode", "flat") ?: "flat",
+                    name = t?.optString("name") ?: "",
+                    monthToDateKwh = t?.optDouble("monthToDateKwh", 0.0) ?: 0.0,
+                    currentLevel = t?.optInt("currentLevel", -1) ?: -1,
+                    levels = t?.optJSONArray("levels").toList { TariffLevel(it.optString("label"), it.optDouble("rate", 0.0), it.optDouble("service", 0.0)) },
+                    note = t?.optString("note") ?: "",
+                )
+            },
+            daily = o.optJSONArray("daily").toList { DayEnergy(it.optString("date"), it.optDouble("kwh", 0.0), it.optDouble("cost", 0.0)) },
+            outlets = o.optJSONArray("outlets").toList { OutletEnergy(it.optInt("relayIndex"), it.optString("name"), it.optDouble("kwh", 0.0), it.optDouble("cost", 0.0)) },
         )
-
     }
 
-
-
-    suspend fun powerHistory(base: String, token: String, stripId: String, range: String = "7d"): PowerHistory = withContext(Dispatchers.IO) {
-
-        val o = JSONObject(request("$base/api/power/history?stripId=$stripId&range=$range", null, token))
-
-        val arr = o.optJSONArray("points")
-
-        val points = (0 until (arr?.length() ?: 0)).map { i ->
-
-            val x = arr!!.getJSONObject(i)
-
-            PowerPoint(
-
-                bucketStart = x.optString("bucketStart"),
-
-                avgW = x.optDouble("avgW", 0.0),
-
-                minW = x.optDouble("minW", 0.0),
-
-                maxW = x.optDouble("maxW", 0.0),
-
-                kwh = x.optDouble("kwh", 0.0),
-
-            )
-
-        }
-
-        PowerHistory(o.optString("range", range), points)
-
+    suspend fun resetEnergy(base: String, token: String, stripId: String) = withContext(Dispatchers.IO) {
+        request("$base/api/power/energy?stripId=$stripId", null, token, "DELETE")
     }
 
-
-
-    suspend fun events(base: String, token: String, stripId: String? = null): List<EventItem> = withContext(Dispatchers.IO) {
-
-        val suffix = stripId?.let { "?stripId=$it" } ?: ""
-
-        val root = JSONObject(request("$base/api/events$suffix", null, token))
-
-        val arr = root.optJSONArray("events")
-
-        (0 until (arr?.length() ?: 0)).map { i ->
-
-            val x = arr!!.getJSONObject(i)
-
-            EventItem(
-
-                id = x.optString("id"),
-
-                type = x.optString("type"),
-
-                message = x.optString("message"),
-
-                stripName = x.optString("stripName").ifBlank { null },
-
-                createdAt = x.optString("createdAt"),
-
-            )
-
-        }
-
+    suspend fun events(base: String, token: String): List<EventItem> = withContext(Dispatchers.IO) {
+        JSONObject(request("$base/api/events", null, token)).optJSONArray("events").toList(::parseEvent)
     }
-
-
 
     suspend fun notifications(base: String, token: String): List<NotificationItem> = withContext(Dispatchers.IO) {
-
-        val root = JSONObject(request("$base/api/notifications", null, token))
-
-        val arr = root.optJSONArray("notifications")
-
-        (0 until (arr?.length() ?: 0)).map { i ->
-
-            val x = arr!!.getJSONObject(i)
-
-            NotificationItem(
-
-                id = x.optString("id"),
-
-                title = x.optString("title"),
-
-                body = x.optString("body"),
-
-                severity = x.optString("severity"),
-
-                readAt = if (x.isNull("readAt")) null else x.optString("readAt"),
-
-                createdAt = x.optString("createdAt"),
-
-            )
-
-        }
-
+        JSONObject(request("$base/api/notifications", null, token)).optJSONArray("notifications").toList(::parseNotification)
     }
-
-
 
     suspend fun markNotificationRead(base: String, token: String, id: String) = withContext(Dispatchers.IO) {
-
         request("$base/api/notifications/$id/read", "{}", token, "PATCH")
-
     }
-
-
 
     suspend fun markAllNotificationsRead(base: String, token: String) = withContext(Dispatchers.IO) {
-
         request("$base/api/notifications/read-all", "{}", token, "POST")
-
     }
-
-
 
     suspend fun deleteNotification(base: String, token: String, id: String) = withContext(Dispatchers.IO) {
-
         request("$base/api/notifications/$id", null, token, "DELETE")
-
     }
-
-
 
     suspend fun schedules(base: String, token: String): List<ScheduleItem> = withContext(Dispatchers.IO) {
-
-        val root = JSONObject(request("$base/api/schedules", null, token))
-
-        val arr = root.optJSONArray("schedules")
-
-        (0 until (arr?.length() ?: 0)).map { i -> parseSchedule(arr!!.getJSONObject(i)) }
-
+        JSONObject(request("$base/api/schedules", null, token)).optJSONArray("schedules").toList(::parseSchedule)
     }
-
-
 
     suspend fun saveSchedule(base: String, token: String, schedule: ScheduleItem): ScheduleItem = withContext(Dispatchers.IO) {
-
         val body = JSONObject()
-
             .put("name", schedule.name)
-
             .put("stripId", schedule.stripId)
-
-            .put("relayIndex", schedule.relayIndex)
-
+            .put("relayIndex", schedule.relayIndex ?: JSONObject.NULL)
             .put("action", schedule.action)
-
             .put("time", schedule.time)
-
             .put("daysOfWeek", org.json.JSONArray(schedule.daysOfWeek))
-
             .put("enabled", schedule.enabled)
-
             .toString()
-
-        val url = if (schedule.id.isBlank()) "$base/api/schedules" else "$base/api/schedules/${schedule.id}"
-
-        val method = if (schedule.id.isBlank()) "POST" else "PATCH"
-
-        parseSchedule(JSONObject(request(url, body, token, method)).getJSONObject("schedule"))
-
+        val isNew = schedule.id.isBlank()
+        val url = if (isNew) "$base/api/schedules" else "$base/api/schedules/${schedule.id}"
+        parseSchedule(JSONObject(request(url, body, token, if (isNew) "POST" else "PATCH")).getJSONObject("schedule"))
     }
-
-
 
     suspend fun deleteSchedule(base: String, token: String, id: String) = withContext(Dispatchers.IO) {
-
         request("$base/api/schedules/$id", null, token, "DELETE")
-
     }
-
-
 
     suspend fun runScheduleNow(base: String, token: String, id: String) = withContext(Dispatchers.IO) {
-
         request("$base/api/schedules/$id/run-now", "{}", token, "POST")
-
     }
 
+    suspend fun rules(base: String, token: String): List<RuleItem> = withContext(Dispatchers.IO) {
+        JSONObject(request("$base/api/rules", null, token)).optJSONArray("rules").toList(::parseRule)
+    }
 
+    suspend fun saveRule(base: String, token: String, rule: RuleItem): RuleItem = withContext(Dispatchers.IO) {
+        val body = JSONObject()
+            .put("type", rule.type)
+            .put("stripId", rule.stripId)
+            .put("relayIndex", rule.relayIndex ?: JSONObject.NULL)
+            .put("name", rule.name)
+            .put("enabled", rule.enabled)
+            .put("params", rule.params)
+            .toString()
+        val isNew = rule.id.isBlank()
+        val url = if (isNew) "$base/api/rules" else "$base/api/rules/${rule.id}"
+        parseRule(JSONObject(request(url, body, token, if (isNew) "POST" else "PUT")).getJSONObject("rule"))
+    }
+
+    suspend fun deleteRule(base: String, token: String, id: String) = withContext(Dispatchers.IO) {
+        request("$base/api/rules/$id", null, token, "DELETE")
+    }
 
     suspend fun settings(base: String, token: String): AppSettings = withContext(Dispatchers.IO) {
-
         parseSettings(JSONObject(request("$base/api/settings", null, token)).getJSONObject("settings"))
-
     }
-
-
 
     suspend fun saveSettings(base: String, token: String, settings: AppSettings): AppSettings = withContext(Dispatchers.IO) {
-
         val body = JSONObject()
-
             .put("theme", settings.theme)
-
             .put("energyUnit", settings.energyUnit)
-
             .put("currency", settings.currency)
-
             .put("ratePerKwh", settings.ratePerKwh)
-
+            .put("tariffMode", settings.tariffMode)
             .put("overloadThresholdWatts", settings.overloadThresholdWatts)
-
             .put("timeFormat", settings.timeFormat)
-
+            .put("accentColor", settings.accentColor)
             .toString()
-
         parseSettings(JSONObject(request("$base/api/settings", body, token, "PATCH")).getJSONObject("settings"))
-
     }
 
+    fun parseEvent(x: JSONObject) = EventItem(
+        id = x.optString("id"),
+        type = x.optString("type"),
+        message = x.optString("message"),
+        stripName = x.optString("stripName").ifBlank { null },
+        createdAt = x.optString("createdAt"),
+    )
 
+    fun parseNotification(x: JSONObject) = NotificationItem(
+        id = x.optString("id"),
+        title = x.optString("title"),
+        body = x.optString("body"),
+        severity = x.optString("severity"),
+        readAt = if (x.isNull("readAt")) null else x.optString("readAt"),
+        createdAt = x.optString("createdAt"),
+    )
 
+    fun parseRule(x: JSONObject) = RuleItem(
+        id = x.optString("id"),
+        type = x.optString("type"),
+        stripId = x.optString("stripId"),
+        relayIndex = if (x.isNull("relayIndex")) null else x.optInt("relayIndex"),
+        name = x.optString("name"),
+        enabled = x.optBoolean("enabled", true),
+        params = x.optJSONObject("params") ?: JSONObject(),
+        status = if (x.isNull("status")) null else x.optString("status"),
+    )
+
+    private fun <T> org.json.JSONArray?.toList(map: (JSONObject) -> T): List<T> =
+        if (this == null) emptyList() else (0 until length()).map { map(getJSONObject(it)) }
     /**
      * Sends Wi-Fi credentials to the strip.
      *
@@ -348,23 +310,21 @@ object Api {
         ssid: String,
         password: String,
         standalone: Boolean,
+        controllerIp: String,
         network: android.net.Network? = null,
     ): String = withContext(Dispatchers.IO) {
         if (standalone) {
             configureStandaloneWifi(ssid, password, network)
         } else {
-            configureStockWifi(ssid, password, network)
+            configureStockWifi(ssid, password, network, controllerIp)
         }
     }
 
     private fun configureStandaloneWifi(ssid: String, password: String, network: android.net.Network?): String {
         val url = URL("http://192.168.4.1/wifi")
         val body = "ssid=${java.net.URLEncoder.encode(ssid, "UTF-8")}&password=${java.net.URLEncoder.encode(password, "UTF-8")}"
-        // Route this specific connection through the strip's network object rather than relying
-        // on process-wide bindProcessToNetwork, which some OEM Wi-Fi managers (e.g. Huawei
-        // WifiPro) can silently override mid-race. Network#openConnection is the robust,
-        // per-connection-scoped alternative recommended by the Android docs for this exact
-        // "connect briefly to a no-internet AP" scenario.
+        // Use the strip's Network object directly so this connection can't be silently rerouted
+        // by OEM Wi-Fi managers that override process-wide bindProcessToNetwork.
         val conn = (network?.openConnection(url) ?: url.openConnection()) as HttpURLConnection
         try {
             conn.connectTimeout = 3_000
@@ -384,41 +344,91 @@ object Api {
         }
     }
 
-    private fun configureStockWifi(ssid: String, password: String, network: android.net.Network?): String {
-        Log.i("SmartStripProvision", "configureStockWifi ssid=$ssid")
-        validateProvisionInput(ssid, password)
-        // Skip the informational "up:ip:" probe (its reply isn't used for anything) and send
-        // "up:connect" first. The strip AP connection has to survive a sequential TCP handshake
-        // with Android before OEM Wi-Fi managers (e.g. Huawei WifiPro) roam the radio away, so
-        // every round trip removed before the one command that actually matters meaningfully
-        // raises the odds of it landing in time.
-        var confirmed = true
-        val connectReply = try {
-            setupCommand("up:connect:$ssid:$password", "up:connect", true, network)
-        } catch (e: CommandSentUnconfirmed) {
-            // The command bytes were already handed to the strip (write+flush succeeded) before
-            // Android tore the radio down while we were waiting to read the ack — observed as
-            // the common failure point once the socket itself is network-bound. The strip almost
-            // certainly received and is acting on the credentials even though we never saw its
-            // reply, so treat this as a likely success instead of a hard failure: failing here
-            // just makes the user retry a step that, in all likelihood, already worked.
-            Log.w("SmartStripProvision", "up:connect sent but unconfirmed: ${e.message}")
-            confirmed = false
-            "up:connect:connect_ok"
+    /** Sends one `\r\n`-terminated setup-mode command line, e.g. "up:ip:192.168.1.50". */
+    private fun mttlSendCommand(socket: Socket, command: String) {
+        socket.getOutputStream().apply {
+            write("$command\r\n".toByteArray(StandardCharsets.UTF_8))
+            flush()
         }
-        Log.i("SmartStripProvision", "connectReply=$connectReply confirmed=$confirmed")
-        if (!connectReply.contains("up:connect:connect_ok")) throw ServerException("The strip rejected the Wi-Fi settings")
-        // The strip already accepted the new Wi-Fi settings at this point and typically reboots
-        // on its own. Best-effort nudge it to reboot now, but don't fail the whole provisioning
-        // if the strip AP connection is already gone by the time this second command goes out —
-        // the critical part already succeeded.
-        runCatching { setupCommand("up:reboot:0", "up:reboot", false, network) }
-            .onFailure { Log.w("SmartStripProvision", "up:reboot failed (strip should still reboot on its own): ${it.message}") }
-        return if (confirmed) {
-            "Strip accepted Wi-Fi settings. Waiting for it to reconnect…"
-        } else {
-            "Wi-Fi settings were sent to the strip, but the connection dropped before it could " +
-                "confirm — it likely received them anyway. Waiting for it to reconnect…"
+    }
+
+    /** Reads the strip's reply and reports whether it contains `token` (e.g. "ip_ok"). */
+    private fun mttlReplyContains(socket: Socket, token: String): Boolean {
+        val reply = String(mttlReadAvailable(socket.getInputStream()), StandardCharsets.UTF_8)
+        Log.i("SmartStripProvision", "setup reply: $reply")
+        return reply.contains(token)
+    }
+
+    /** Drains whatever the strip sends back within the socket's read timeout. */
+    private fun mttlReadAvailable(input: InputStream): ByteArray {
+        val data = ByteArrayOutputStream()
+        val chunk = ByteArray(512)
+        try {
+            while (true) {
+                val count = input.read(chunk)
+                if (count <= 0) break
+                data.write(chunk, 0, count)
+                if (count < chunk.size) break
+            }
+        } catch (e: SocketTimeoutException) {
+            // No more bytes coming, not a failure.
+        }
+        return data.toByteArray()
+    }
+
+    private fun mttlOpenSetupSocket(network: android.net.Network?): Socket {
+        // Socket from Network#socketFactory stays bound to that network regardless of
+        // process-wide default-network changes (observed unreliable on Huawei WifiPro).
+        val socket = network?.socketFactory?.createSocket() ?: Socket()
+        try {
+            // Short connect timeout: a live strip (one Wi-Fi hop away) accepts well under a
+            // second. Failing fast matters because the usual failure mode is the OS tearing down
+            // the strip AP mid-request (e.g. Huawei WifiPro roam-back) — a long timeout just
+            // wastes the user's time finding out, instead of letting them tap "Retry" quickly.
+            socket.connect(InetSocketAddress(MTTL_SETUP_HOST, MTTL_SETUP_PORT), 2_500)
+        } catch (e: Exception) {
+            runCatching { socket.close() }
+            val target = "$MTTL_SETUP_HOST:$MTTL_SETUP_PORT"
+            val hint = "Join this phone to the strip setup Wi-Fi (TONLY_TAP_*, password LGU_*) and try again."
+            throw ServerException("Could not reach $target. ${e.message ?: ""} $hint")
+        }
+        return socket
+    }
+
+    private fun configureStockWifi(ssid: String, password: String, network: android.net.Network?, controllerIp: String): String {
+        Log.i("SmartStripProvision", "configureStockWifi ssid=$ssid controllerIp=$controllerIp")
+        validateProvisionInput(ssid, password)
+
+        val socket = mttlOpenSetupSocket(network)
+        try {
+            socket.soTimeout = 4_000
+
+            // up:ip: tells the strip which address to phone home to (our server, port 10086)
+            // after it joins the target Wi-Fi — without this it keeps whatever server it last had.
+            mttlSendCommand(socket, "up:ip:$controllerIp")
+            if (!mttlReplyContains(socket, "ip_ok")) {
+                throw ServerException("Strip did not accept the server address. Make sure it's in setup mode and try again.")
+            }
+
+            mttlSendCommand(socket, "up:connect:$ssid:$password")
+            val connected = mttlReplyContains(socket, "connect_ok")
+
+            // Firmware applies the Wi-Fi and reboots on its own after connect_ok; this just
+            // signals it to leave setup mode sooner. No reply is expected for it.
+            runCatching { mttlSendCommand(socket, "up:reboot:0") }
+
+            return if (connected) {
+                "Strip accepted Wi-Fi settings. Waiting for it to reconnect…"
+            } else {
+                "Wi-Fi settings were sent to the strip. Waiting for it to reconnect…"
+            }
+        } catch (e: ServerException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e("SmartStripProvision", "configureStockWifi failed", e)
+            throw ServerException("Could not send Wi-Fi settings to the strip: ${e.message ?: e.javaClass.simpleName}")
+        } finally {
+            runCatching { socket.close() }
         }
     }
 
@@ -484,7 +494,7 @@ object Api {
     }
 
     suspend fun provisionAndRegister(base: String, token: String, serverIp: String, ssid: String, password: String): ProvisionResult = withContext(Dispatchers.IO) {
-        configureStripWifi(ssid, password, false)
+        configureStripWifi(ssid, password, standalone = false, controllerIp = serverIp)
         waitForRegistration(base, token)
     }
 
@@ -510,6 +520,11 @@ object Api {
     /** PATCH /api/strips/{id} — update strip name. */
     suspend fun updateStrip(base: String, token: String, stripId: String, name: String) = withContext(Dispatchers.IO) {
         val body = JSONObject().put("name", name).toString()
+        request("$base/api/strips/$stripId", body, token, "PATCH")
+    }
+
+    suspend fun updateStripLocation(base: String, token: String, stripId: String, location: String?) = withContext(Dispatchers.IO) {
+        val body = JSONObject().put("location", location ?: JSONObject.NULL).toString()
         request("$base/api/strips/$stripId", body, token, "PATCH")
     }
 
@@ -552,28 +567,18 @@ object Api {
         }
     }
 
-    private fun telemetryMap(base: String, token: String): Map<String, JSONObject> {
-        val root = JSONObject(request("$base/api/mttl/status", null, token))
-        val array = root.optJSONArray("strips")
-        return (0 until (array?.length() ?: 0)).associate { i ->
-            val telemetry = array!!.getJSONObject(i)
-            telemetry.optString("driverStripId") to telemetry
-        }
-    }
-
-    private fun parseStrip(o: JSONObject, telemetryByDriverId: Map<String, JSONObject>): Strip {
+    fun parseStrip(o: JSONObject): Strip {
         val relays = o.optJSONArray("relays")
-        val driverId = o.optString("driverStripId")
-        val telemetry = telemetryByDriverId[driverId]
+        val telemetry = o.optJSONObject("telemetry")
         val telemetryOutlets = telemetry?.optJSONArray("outlets")
-        val energyByIndex = (0 until (telemetryOutlets?.length() ?: 0)).associate { i ->
+        val extraByIndex = (0 until (telemetryOutlets?.length() ?: 0)).associate { i ->
             val outlet = telemetryOutlets!!.getJSONObject(i)
             outlet.optInt("relayIndex") to outlet
         }
         val outlets = (0 until (relays?.length() ?: 0)).map { i ->
             val x = relays!!.getJSONObject(i)
             val relayIndex = x.optInt("index")
-            val extra = energyByIndex[relayIndex]
+            val extra = extraByIndex[relayIndex]
             Outlet(
                 n = relayIndex + 1,
                 on = x.optString("state") == "on",
@@ -581,6 +586,8 @@ object Api {
                 energyKwh = extra?.optDouble("energyKwh", 0.0) ?: 0.0,
                 tempC = extra?.optInt("temperatureC") ?: 0,
                 icon = x.optString("icon", "plug"),
+                name = x.optString("name").ifBlank { "Outlet ${relayIndex + 1}" },
+                changedAtMs = parseIsoMs(x.optString("lastChangedAt")),
             )
         }
         return Strip(
@@ -591,24 +598,40 @@ object Api {
             online = o.optString("connectivity") == "online",
             on = outlets.any { it.on },
             powerW = o.optDouble("totalWatts", 0.0),
-            energyKwh = outlets.sumOf { it.energyKwh },
+            energyKwh = telemetry?.optDouble("totalEnergyKwh", 0.0) ?: 0.0,
             voltage = telemetry?.optDoubleOrNull("voltageV"),
             currentA = telemetry?.optDoubleOrNull("currentA"),
             rssi = telemetry?.optIntOrNull("rssi"),
             icon = o.optString("icon", "power-strip"),
+            location = if (o.isNull("location")) null else o.optString("location").ifBlank { null },
             outlets = outlets,
         )
     }
-
     private suspend fun waitForDiscoveredStrip(base: String, token: String): List<DiscoveredStrip> {
+        // Treat each attempt as retryable, not fatal: the phone briefly has no DNS/routing right
+        // after leaving the strip's AP, which used to throw a raw UnknownHostException here.
         repeat(12) {
-            val scanId = JSONObject(request("$base/api/strips/scan", "{}", token)).optString("scanId")
-            repeat(8) {
+            val scanId = runCatching {
+                JSONObject(request("$base/api/strips/scan", "{}", token)).optString("scanId")
+            }.getOrNull()
+            if (scanId.isNullOrBlank()) {
                 delay(1000)
-                val record = JSONObject(request("$base/api/strips/scan/$scanId", null, token))
-                if (record.optString("status") == "done") return parseDiscovered(record)
-                if (record.optString("status") == "error") return emptyList()
+                return@repeat
             }
+            for (poll in 1..8) {
+                delay(1000)
+                val record = runCatching { JSONObject(request("$base/api/strips/scan/$scanId", null, token)) }
+                    .getOrNull() ?: continue
+                val status = record.optString("status")
+                // An empty "done" scan can finish just before the strip connects, so scan again.
+                if (status == "done") {
+                    val found = parseDiscovered(record)
+                    if (found.isNotEmpty()) return found
+                    break
+                }
+                if (status == "error") break
+            }
+            delay(2000)
         }
         return emptyList()
     }
@@ -616,51 +639,31 @@ object Api {
 
 
     private fun parseSchedule(x: JSONObject): ScheduleItem {
-
         val days = x.optJSONArray("daysOfWeek")
-
         return ScheduleItem(
-
             id = x.optString("id"),
-
             name = x.optString("name"),
-
             stripId = x.optString("stripId"),
-
             relayIndex = if (x.isNull("relayIndex")) null else x.optInt("relayIndex"),
-
             action = x.optString("action", "on"),
-
             time = x.optString("time", "18:00"),
-
             daysOfWeek = (0 until (days?.length() ?: 0)).map { days!!.optInt(it) },
-
             enabled = x.optBoolean("enabled", true),
-
         )
-
     }
 
+    fun parseIsoMs(s: String?): Long = if (s.isNullOrBlank()) 0L else runCatching { java.time.Instant.parse(s).toEpochMilli() }.getOrDefault(0L)
 
-
-    private fun parseSettings(x: JSONObject): AppSettings = AppSettings(
-
+    fun parseSettings(x: JSONObject) = AppSettings(
         theme = x.optString("theme", "system"),
-
         energyUnit = x.optString("energyUnit", "kWh"),
-
         currency = x.optString("currency", "USD"),
-
         ratePerKwh = x.optDouble("ratePerKwh", 0.16),
-
+        tariffMode = x.optString("tariffMode", "egypt"),
         overloadThresholdWatts = x.optInt("overloadThresholdWatts", 1800),
-
         timeFormat = x.optString("timeFormat", "24h"),
-
+        accentColor = x.optString("accentColor", AppTheme.DEFAULT_ACCENT),
     )
-
-
-
     private fun parseDiscovered(record: JSONObject): List<DiscoveredStrip> {
         val array = record.optJSONArray("discovered")
         return (0 until (array?.length() ?: 0)).map { i ->
@@ -672,51 +675,6 @@ object Api {
                 ipAddress = if (x.isNull("ipAddress")) null else x.optString("ipAddress"),
                 relayCount = x.optInt("relayCount", 4),
             )
-        }
-    }
-
-    /** Thrown by [setupCommand] when the command bytes were already written+flushed to the
-     * strip before the connection died while waiting for its reply. Callers that know the
-     * command is likely to have taken effect regardless (e.g. "up:connect") can treat this more
-     * optimistically than a true send failure (where the strip never got the bytes at all). */
-    private class CommandSentUnconfirmed(message: String) : Exception(message)
-
-    private fun setupCommand(command: String, label: String, sensitive: Boolean, network: android.net.Network?): String {
-        var sent = false
-        try {
-            // Create the socket via the strip's Network object (when known) instead of a plain
-            // Socket() relying on process-wide bindProcessToNetwork. Process-wide binding can be
-            // silently overridden mid-race by OEM Wi-Fi managers (observed: Huawei WifiPro); a
-            // socket created from Network#socketFactory is scoped to that network at the kernel
-            // routing level regardless of what the process-wide default network changes to.
-            val socket = network?.socketFactory?.createSocket() ?: Socket()
-            socket.use {
-                // Short timeouts: a live connection to the strip (one Wi-Fi hop away) replies in
-                // well under a second. Failing fast here matters because the usual failure mode
-                // is the OS tearing down the strip AP mid-request (e.g. Huawei WifiPro roam-back)
-                // — a long timeout just wastes the user's time waiting to find out, instead of
-                // letting them tap "Retry connect & send" again quickly.
-                it.connect(InetSocketAddress(MTTL_SETUP_HOST, MTTL_SETUP_PORT), 2_500)
-                it.soTimeout = 4_000
-                val out = it.getOutputStream()
-                val input = it.getInputStream()
-                out.write("$command\r\n".toByteArray(Charsets.UTF_8))
-                out.flush()
-                // The bytes have left the phone at this point — a failure from here on (e.g.
-                // reading the reply) means the strip likely already has the command, even if we
-                // never find out for sure.
-                sent = true
-                it.shutdownOutput()
-                val bytes = ByteArray(1024)
-                val count = input.read(bytes)
-                return if (count > 0) String(bytes, 0, count, Charsets.UTF_8).trim() else ""
-            }
-        } catch (e: Exception) {
-            Log.e("SmartStripProvision", "setupCommand failed label=$label command=${if (sensitive) "***" else command} sent=$sent", e)
-            if (sent) throw CommandSentUnconfirmed(e.message ?: "connection dropped after sending")
-            val target = "$MTTL_SETUP_HOST:$MTTL_SETUP_PORT"
-            val hint = "Join this phone to the strip setup Wi-Fi (TONLY_TAP_*, password LGU_*) and try again."
-            throw ServerException("Could not send $label to $target. ${e.message ?: ""} $hint")
         }
     }
 

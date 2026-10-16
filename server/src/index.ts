@@ -8,10 +8,19 @@ import { initDriver } from './drivers/DriverRegistry.js';
 import { startTicker } from './scheduler/ticker.js';
 import { resyncDriverState, wireDriverEvents } from './services/fleetService.js';
 import { configurePush } from './services/pushService.js';
+import { appendServer } from './services/diagnosticsService.js';
 import { createLogger } from './utils/logger.js';
 import { attachWebSocketServer } from './ws/wsServer.js';
 
 const log = createLogger('bootstrap');
+
+for (const event of ['uncaughtException', 'unhandledRejection'] as const) {
+  process.on(event, (err) => {
+    appendServer('error', event, err instanceof Error ? (err.stack ?? err.message) : String(err));
+    console.error(event, err);
+    process.exit(1);
+  });
+}
 
 async function main(): Promise<void> {
   await Promise.all([initMainDb(), initEventsDb(), initPowerDb()]);
