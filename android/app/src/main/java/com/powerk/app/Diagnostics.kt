@@ -22,6 +22,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -128,10 +129,10 @@ object Diag {
 
     private fun envelope(): JSONObject = JSONObject().put("source", "android").put("device", device).put("version", version)
 
-    suspend fun flush(): Boolean {
-        if (!enabled) return false
+    suspend fun flush(): Boolean = withContext(Dispatchers.IO) {
+        if (!enabled) return@withContext false
         val batch = synchronized(lock) { pending.toList().also { pending.clear() } }
-        if (batch.isEmpty()) return true
+        if (batch.isEmpty()) return@withContext true
         val payload = envelope().put("entries", JSONArray(batch)).toString()
         val ok = post("/logs", payload.toRequestBody(JSON_TYPE))
         if (ok) {
@@ -141,7 +142,7 @@ object Diag {
             while (pending.size > MAX_PENDING) pending.removeFirst()
             status = "Server unreachable; ${pending.size} lines queued"
         }
-        return ok
+        ok
     }
 
     // ---- crashes -------------------------------------------------------------------------
@@ -263,23 +264,30 @@ object Diag {
 
     private var lastShotAt = 0L
     private val lastShotByScreen = HashMap<String, Long>()
+    private val startedAt = SystemClock.elapsedRealtime()
+
+    /** Reused for every capture so a start-up screenshot never triggers a full-screen bitmap GC. */
+    @Volatile private var freeBitmap: Bitmap? = null
 
     /** Captures only this app's own window (never other apps or system UI). */
     fun captureScreen(activity: Activity, screen: String, force: Boolean = false) {
         if (!enabled || !screenshots) return
         if (screen == "settings") return
         val now = SystemClock.elapsedRealtime()
-        if (!force && (now - lastShotAt < 20_000L || now - (lastShotByScreen[screen] ?: -300_000L) < 300_000L)) return
+        // Never capture during the first seconds: the alloc + PixelCopy wobbles the start-up frames.
+        if (!force && (now - startedAt < 8_000L || now - lastShotAt < 20_000L || now - (lastShotByScreen[screen] ?: -300_000L) < 300_000L)) return
         val view = activity.window?.decorView ?: return
         if (view.width == 0 || view.height == 0) return
         lastShotAt = now
         lastShotByScreen[screen] = now
-        val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+        val reusable = freeBitmap?.takeIf { !it.isRecycled && it.width == view.width && it.height == view.height }
+        freeBitmap = null
+        val bitmap = reusable ?: Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
         runCatching {
             PixelCopy.request(activity.window, bitmap, { result ->
-                if (result == PixelCopy.SUCCESS) scope.launch { upload(bitmap, screen) } else bitmap.recycle()
+                if (result == PixelCopy.SUCCESS) scope.launch { upload(bitmap, screen) } else freeBitmap = bitmap
             }, Handler(Looper.getMainLooper()))
-        }.onFailure { bitmap.recycle(); Log.w(TAG, "pixelcopy", it) }
+        }.onFailure { freeBitmap = bitmap; Log.w(TAG, "pixelcopy", it) }
     }
 
     private fun upload(source: Bitmap, screen: String) {
@@ -288,7 +296,8 @@ object Diag {
         val out = ByteArrayOutputStream()
         scaled.compress(Bitmap.CompressFormat.JPEG, 62, out)
         if (scaled !== source) scaled.recycle()
-        source.recycle()
+        // Keep the full-size frame for the next capture instead of recycling it.
+        freeBitmap = source
         val body = out.toByteArray().toRequestBody("image/jpeg".toMediaType())
         val q = "?device=${java.net.URLEncoder.encode(device, "UTF-8")}&screen=${java.net.URLEncoder.encode(screen, "UTF-8")}"
         post("/screenshot$q", body)

@@ -50,6 +50,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -103,7 +104,9 @@ import com.powerk.app.components.BackBtn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -154,8 +157,7 @@ fun HomeScreen(
             Row(Modifier.fillMaxWidth().statusBarsPadding().padding(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     SectionLabel("Control center")
-                    Text("My strips", fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1, color = MaterialTheme.colorScheme.onBackground)
-                    Text(Server.host, fontFamily = Mono, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("My strips", fontSize = 24.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp, maxLines = 1, color = MaterialTheme.colorScheme.onBackground)
                 }
                 HeaderButton(Icons.Rounded.Refresh, "Refresh") { vm.refresh() }
                 Spacer(Modifier.width(8.dp))
@@ -187,7 +189,7 @@ fun HomeScreen(
                 }
                 item(key = "layouttoggle") {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        SectionLabel("Strips", Modifier.weight(1f))
+                        SectionLabel(if (strips.isEmpty()) "Strips" else "Strips · ${strips.size}", Modifier.weight(1f))
                         LayoutToggle(layout) { layout = it; prefs.edit().putInt("home_layout", it).apply() }
                     }
                 }
@@ -228,7 +230,7 @@ private fun LazyListScope.stripBody(
         !vm.loaded && vm.link != Link.OFFLINE -> items(2, key = { "sk$it" }) { Shimmer(Modifier.fillMaxWidth().height(200.dp)) }
         !vm.loaded -> item(key = "offline") {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                MessageCard("Can't reach ${Server.host}. Retrying automatically.", true, Icons.Rounded.Warning)
+                MessageCard("Can't reach SmartStrip. Retrying automatically.", true, Icons.Rounded.Warning)
                 Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.fillMaxWidth().tap { vm.restart() }) {
                     Text("Retry now", Modifier.padding(12.dp), fontSize = 14.sp, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.SemiBold)
                 }
@@ -247,11 +249,11 @@ private const val LAYOUT_TILES = 2
 @Composable
 private fun LayoutToggle(layout: Int, onChange: (Int) -> Unit) {
     val scheme = MaterialTheme.colorScheme
-    val slot = 36.dp
+    val slot = 34.dp
     val x by animateDpAsState(slot * layout, spring(0.7f, 700f), label = "toggleX")
-    Surface(shape = CircleShape, color = scheme.surface, border = BorderStroke(1.dp, scheme.outlineVariant)) {
+    Surface(shape = CircleShape, color = scheme.surfaceContainerLow, border = BorderStroke(1.dp, scheme.outlineVariant)) {
         Box(Modifier.padding(2.dp)) {
-            Box(Modifier.offset(x = x).size(slot, 34.dp).background(scheme.primary, CircleShape))
+            Box(Modifier.offset(x = x).size(slot, 32.dp).background(scheme.primary, CircleShape))
             Row {
                 listOf(
                     Triple(LAYOUT_ROWS, Icons.Rounded.ViewAgenda, "List layout"),
@@ -259,8 +261,8 @@ private fun LayoutToggle(layout: Int, onChange: (Int) -> Unit) {
                     Triple(LAYOUT_TILES, Icons.Rounded.GridView, "Tiles layout"),
                 ).forEach { (mode, icon, label) ->
                     val tint by animateColorAsState(if (layout == mode) scheme.onPrimary else scheme.onSurfaceVariant, tween(160), label = "toggleTint")
-                    Box(Modifier.size(slot, 34.dp).clip(CircleShape).tap { if (layout != mode) onChange(mode) }, contentAlignment = Alignment.Center) {
-                        Icon(icon, label, Modifier.size(18.dp), tint = tint)
+                    Box(Modifier.size(slot, 32.dp).clip(CircleShape).tap { if (layout != mode) onChange(mode) }, contentAlignment = Alignment.Center) {
+                        Icon(icon, label, Modifier.size(17.dp), tint = tint)
                     }
                 }
             }
@@ -270,11 +272,15 @@ private fun LayoutToggle(layout: Int, onChange: (Int) -> Unit) {
 @Composable
 private fun HeaderButton(icon: ImageVector, label: String, primary: Boolean = false, onClick: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(14.dp)
     Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = if (primary) scheme.primary else scheme.surface,
+        shape = shape,
+        color = if (primary) scheme.primary else scheme.surfaceContainerLow,
         border = if (primary) null else BorderStroke(1.dp, scheme.outlineVariant),
-        modifier = Modifier.size(38.dp).tap(onClick = onClick),
+        modifier = Modifier
+            .then(if (primary) Modifier.shadow(10.dp, shape, ambientColor = scheme.primary.copy(alpha = 0.55f), spotColor = scheme.primary.copy(alpha = 0.35f)) else Modifier)
+            .size(40.dp)
+            .tap(onClick = onClick),
     ) {
         Box(contentAlignment = Alignment.Center) { Icon(icon, label, Modifier.size(20.dp), tint = if (primary) scheme.onPrimary else scheme.onSurface) }
     }
@@ -317,7 +323,18 @@ private fun TotalCard(vm: StripsViewModel, strips: List<Strip>, link: Link) {
     val online = strips.count { it.online }
     val outlets = strips.sumOf { it.outlets.size }
     val on = strips.sumOf { s -> s.outlets.count { it.on } }
-    VCard(padding = 12.dp) {
+    val threshold = (vm.settings?.overloadThresholdWatts ?: 1800).coerceAtLeast(100).toFloat()
+    val load = (watts / threshold).coerceIn(0f, 1f)
+    val barColor by animateColorAsState(
+        when {
+            load > 0.9f -> scheme.error
+            load > 0.7f -> scheme.tertiary
+            else -> scheme.primary
+        },
+        tween(320),
+        label = "loadBar",
+    )
+    VCard(padding = 14.dp) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Total power right now", Modifier.weight(1f), fontSize = 12.sp, color = scheme.onSurfaceVariant)
             LiveBadge(link)
@@ -326,9 +343,9 @@ private fun TotalCard(vm: StripsViewModel, strips: List<Strip>, link: Link) {
             val kw = watts >= 1000
             Text(
                 if (kw) String.format(java.util.Locale.US, "%.2f", watts / 1000) else String.format(java.util.Locale.US, "%.0f", watts),
-                fontFamily = Mono, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, color = scheme.primary, maxLines = 1,
+                fontFamily = Mono, fontSize = 32.sp, fontWeight = FontWeight.SemiBold, color = scheme.primary, maxLines = 1, letterSpacing = (-1).sp,
             )
-            Text(if (kw) " kW" else " W", Modifier.padding(bottom = 5.dp), fontFamily = Mono, fontSize = 13.sp, color = scheme.primary)
+            Text(if (kw) " kW" else " W", Modifier.padding(bottom = 6.dp), fontFamily = Mono, fontSize = 13.sp, color = scheme.primary)
             Spacer(Modifier.weight(1f))
             Surface(
                 shape = CircleShape,
@@ -338,6 +355,18 @@ private fun TotalCard(vm: StripsViewModel, strips: List<Strip>, link: Link) {
                 },
             ) { Text("All off", Modifier.padding(horizontal = 12.dp, vertical = 6.dp), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = scheme.error) }
         }
+        Spacer(Modifier.height(10.dp))
+        Box(Modifier.fillMaxWidth().height(6.dp).clip(CircleShape).background(scheme.surfaceContainerHigh)) {
+            Box(
+                Modifier.fillMaxHeight().fillMaxWidth(load).clip(CircleShape)
+                    .background(Brush.horizontalGradient(listOf(barColor.copy(alpha = 0.65f), barColor))),
+            )
+        }
+        Text(
+            "${(load * 100).toInt()}% of ${threshold.toInt()} W limit",
+            Modifier.padding(top = 4.dp),
+            fontSize = 10.sp, color = scheme.onSurfaceVariant, fontFamily = Mono,
+        )
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TotalStat("$online/${strips.size}", "strips online", Modifier.weight(1f))

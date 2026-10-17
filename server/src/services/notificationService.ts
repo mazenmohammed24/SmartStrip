@@ -96,3 +96,10 @@ export async function removeNotification(id: string): Promise<void> {
   db.data.notifications = db.data.notifications.filter((n) => n.id !== id);
   if (db.data.notifications.length !== before) await db.write();
 }
+
+export async function removeAllNotifications(): Promise<void> {
+  const db = getMainDb();
+  if (db.data.notifications.length === 0) return;
+  db.data.notifications = [];
+  await db.write();
+}

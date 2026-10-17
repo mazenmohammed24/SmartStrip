@@ -47,7 +47,6 @@ fun ProvisionWizard(
     selectedStrip: String?,
     provisionSsid: String,
     provisionPassword: String,
-    serverUrl: String,
     provisionIp: String,
     provisionStatus: String?,
     provisionOk: Boolean,
@@ -59,7 +58,6 @@ fun ProvisionWizard(
     onSsidChange: (String) -> Unit,
     onPasswordChange: (String) -> Unit,
     onNextStep1: () -> Unit,
-    onServerUrlChange: (String) -> Unit,
     onProvisionIpChange: (String) -> Unit,
     onNextStep2: () -> Unit,
     onFinish: () -> Unit,
@@ -110,10 +108,9 @@ fun ProvisionWizard(
             }
             2 -> {
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                    OutlinedTextField(value = serverUrl, onValueChange = onServerUrlChange, label = { Text(stringResource(R.string.field_server_url)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
                     OutlinedTextField(value = provisionIp, onValueChange = onProvisionIpChange, label = { Text(stringResource(R.string.field_server_ip_for_strip)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 }
-                Button(enabled = serverUrl.isNotBlank() && provisionIp.isNotBlank(), onClick = onNextStep2, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.provision_next)) }
+                Button(enabled = provisionIp.isNotBlank(), onClick = onNextStep2, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.provision_next)) }
             }
             3 -> {
                 Button(enabled = !busy && !connectingAp, onClick = onFinish, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.provision_step_4_button)) }

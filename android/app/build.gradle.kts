@@ -55,6 +55,10 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.navigation:navigation-compose:2.8.9")
+    implementation("dev.chrisbanes.haze:haze:2.0.1")
+    implementation("dev.chrisbanes.haze:haze-blur-materials:2.0.1")
+    implementation("dev.chrisbanes.haze:haze-glass:2.0.1")
+    implementation("dev.chrisbanes.haze:haze-glass-material3:2.0.1")
 
     testImplementation("junit:junit:4.12")
     testImplementation("org.json:json:20180813")

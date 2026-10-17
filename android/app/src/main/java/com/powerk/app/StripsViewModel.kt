@@ -284,6 +284,16 @@ class StripsViewModel : ViewModel() {
         launchApi("Failed") { Api.deleteNotification(Server.base, Server.token, id) }
     }
 
+    fun clearNotifications() {
+        notifications = emptyList()
+        launchApi("Failed") { Api.clearNotifications(Server.base, Server.token) }
+    }
+
+    fun clearEvents() {
+        events = emptyList()
+        launchApi("Failed") { Api.clearEvents(Server.base, Server.token) }
+    }
+
     fun saveSchedule(item: ScheduleItem, onDone: () -> Unit = {}) {
         viewModelScope.launch {
             try {

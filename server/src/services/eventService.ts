@@ -60,6 +60,13 @@ export function listEvents(query: ListEventsQuery): EventDTO[] {
   return events.slice(0, limit).map(toDTO);
 }
 
+export async function clearEvents(): Promise<void> {
+  const db = getEventsDb();
+  if (db.data.events.length === 0) return;
+  db.data.events = [];
+  await db.write();
+}
+
 export async function pruneOldEvents(maxAgeDays = 90): Promise<void> {
   const db = getEventsDb();
   const cutoff = new Date(Date.now() - maxAgeDays * 24 * 60 * 60 * 1000).toISOString();

@@ -174,19 +174,12 @@ private fun NumField(value: String, suffix: String?, keyboard: KeyboardType = Ke
 @Composable
 fun SettingsScreen(vm: StripsViewModel, onNavigate: (String) -> Unit) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val scheme = MaterialTheme.colorScheme
     val settings = vm.settings
-    var serverUrl by remember { mutableStateOf(Server.serverUrl) }
-    var token by remember { mutableStateOf(Server.token) }
-    var status by remember { mutableStateOf<String?>(null) }
-    var statusOk by remember { mutableStateOf(false) }
-    var busy by remember { mutableStateOf(false) }
     var lang by remember { mutableStateOf(Lang.code) }
     var showAdd by remember { mutableStateOf(false) }
 
     fun update(next: (AppSettings) -> AppSettings) { settings?.let { vm.saveSettings(next(it)) } }
-    fun commit() { Server.save(serverUrl, token); vm.restart() }
 
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).imePadding().navigationBarsPadding().padding(bottom = 16.dp)) {
         ScreenHeader(stringResource(R.string.settings_title), eyebrow = "Preferences")
@@ -283,42 +276,8 @@ fun SettingsScreen(vm: StripsViewModel, onNavigate: (String) -> Unit) {
                 }
             }
 
-            Group(stringResource(R.string.server_title)) {
-                Row2("Connection") { LiveBadge(vm.link) }
-                Column(Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                        VTextField(serverUrl, { serverUrl = it }, stringResource(R.string.field_server_url))
-                        VTextField(token, { token = it }, stringResource(R.string.field_token))
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { commit(); status = context.getString(R.string.saved); statusOk = true }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.save), fontSize = 13.sp) }
-                        FilledTonalButton(
-                            enabled = !busy,
-                            modifier = Modifier.weight(1f),
-                            onClick = {
-                                commit(); busy = true; status = null
-                                scope.launch {
-                                    try {
-                                        val list = Api.snapshot(Server.base, Server.token)
-                                        status = context.getString(R.string.connected_summary, list.size, list.count { it.online })
-                                        statusOk = true
-                                    } catch (e: Exception) { status = e.message ?: "connection failed"; statusOk = false }
-                                    busy = false
-                                }
-                            },
-                        ) { Text(if (busy) "…" else stringResource(R.string.test), fontSize = 13.sp) }
-                    }
-                    AnimatedVisibility(visible = status != null, enter = fadeIn(), exit = fadeOut()) {
-                        Surface(shape = MaterialTheme.shapes.medium, color = if (statusOk) scheme.primaryContainer else scheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
-                            Text(status ?: "", Modifier.padding(10.dp), fontSize = 12.sp, color = if (statusOk) scheme.onPrimaryContainer else scheme.onErrorContainer)
-                        }
-                    }
-                    OutlinedButton(
-                        onClick = { commit(); context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(Server.base))) },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = Server.configured,
-                    ) { Text(stringResource(R.string.open_web_ui), fontSize = 13.sp) }
-                }
+            Group("Connection") {
+                Row2("Status") { LiveBadge(vm.link) }
             }
 
             Group("Diagnostics") {
@@ -332,8 +291,6 @@ fun SettingsScreen(vm: StripsViewModel, onNavigate: (String) -> Unit) {
                 Row2("SmartStrip", "Local control for MTTL-W01 strips, no cloud") {
                     Text(version, fontFamily = Mono, fontSize = 12.sp, color = scheme.onSurfaceVariant)
                 }
-                Divider()
-                Row2("Server") { Text(Server.host, Modifier.widthIn(max = 200.dp), fontFamily = Mono, fontSize = 11.sp, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             }
         }
     }

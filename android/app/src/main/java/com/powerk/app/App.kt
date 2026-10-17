@@ -19,15 +19,30 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.sp
 import com.powerk.app.components.DockItem
 import com.powerk.app.components.FloatingDock
 import com.powerk.app.components.Ticker
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.rememberHazeState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -122,38 +137,96 @@ private fun String?.tabRoute(): String? = this?.substringBefore('?')?.takeIf { r
 
 @Composable
 private fun Splash() {
-    val primary = MaterialTheme.colorScheme.primary
+    val scheme = MaterialTheme.colorScheme
+    val accent = scheme.primary
+    val light = scheme.background.luminance() > 0.5f
     val scale = remember { Animatable(0.5f) }
     val glow = remember { Animatable(0f) }
     val text = remember { Animatable(0f) }
+    val sheen = rememberInfiniteTransition(label = "splashSheen")
+    val angle by sheen.animateFloat(0f, 360f, infiniteRepeatable(tween(7000, easing = LinearEasing)), label = "angle")
     LaunchedEffect(Unit) {
         launch { scale.animateTo(1f, spring(0.55f, Spring.StiffnessLow)) }
         launch { glow.animateTo(1f, tween(650, easing = FastOutSlowInEasing)) }
         launch { delay(280); text.animateTo(1f, tween(450, easing = FastOutSlowInEasing)) }
     }
-    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize().background(scheme.background), contentAlignment = Alignment.Center) {
         Box(
-            Modifier.size(320.dp).graphicsLayer { alpha = glow.value * 0.9f; scaleX = 0.7f + glow.value * 0.3f; scaleY = 0.7f + glow.value * 0.3f }
-                .background(Brush.radialGradient(listOf(primary.copy(alpha = 0.42f), Color.Transparent))),
+            Modifier.size(380.dp).graphicsLayer { alpha = glow.value * 0.95f; scaleX = 0.7f + glow.value * 0.3f; scaleY = 0.7f + glow.value * 0.3f }
+                .background(Brush.radialGradient(listOf(accent.copy(alpha = 0.42f), accent.copy(alpha = 0.10f), Color.Transparent))),
         )
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Image(
-                painterResource(R.drawable.ic_launcher_foreground), null,
-                Modifier.size(128.dp).graphicsLayer { scaleX = scale.value; scaleY = scale.value; alpha = (scale.value * 1.6f - 0.6f).coerceIn(0f, 1f) },
-            )
+            Box(
+                Modifier.size(134.dp).graphicsLayer { scaleX = scale.value; scaleY = scale.value; alpha = (scale.value * 1.6f - 0.6f).coerceIn(0f, 1f) },
+                contentAlignment = Alignment.Center,
+            ) {
+                // Glass disc that picks up the user's accent colour.
+                Box(
+                    Modifier.fillMaxSize().clip(CircleShape)
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    Color.White.copy(alpha = if (light) 0.55f else 0.16f),
+                                    accent.copy(alpha = 0.30f),
+                                    scheme.surface.copy(alpha = 0.50f),
+                                ),
+                            ),
+                        )
+                        .border(1.dp, Brush.linearGradient(listOf(Color.White.copy(alpha = 0.65f), accent.copy(alpha = 0.40f), Color.White.copy(alpha = 0.10f))), CircleShape),
+                )
+                // Slow rotating sheen, like light travelling across curved glass.
+                Box(
+                    Modifier.fillMaxSize().clip(CircleShape).graphicsLayer { rotationZ = angle }.drawBehind {
+                        drawRect(
+                            Brush.linearGradient(
+                                listOf(Color.Transparent, Color.White.copy(alpha = if (light) 0.30f else 0.14f), Color.Transparent),
+                                start = Offset.Zero,
+                                end = Offset(size.width, size.height),
+                            ),
+                        )
+                    },
+                )
+                // The brand bolt (same path as ic_launcher_foreground), filled with the accent gradient.
+                Canvas(Modifier.size(76.dp)) {
+                    val k = size.minDimension / 108f
+                    val bolt = Path().apply {
+                        moveTo(61f * k, 22f * k); lineTo(33f * k, 62f * k); lineTo(51f * k, 62f * k)
+                        lineTo(47f * k, 86f * k); lineTo(75f * k, 46f * k); lineTo(57f * k, 46f * k); close()
+                    }
+                    drawPath(bolt, Brush.linearGradient(listOf(blend(accent, Color.White, 0.55f), accent)))
+                }
+            }
             Text(
                 stringResource(R.string.app_name).uppercase(),
-                fontSize = 22.sp, fontWeight = FontWeight.Black, color = Color.White, letterSpacing = (4 + (1f - text.value) * 8).sp,
-                modifier = Modifier.graphicsLayer { alpha = text.value },
+                fontSize = 22.sp, fontWeight = FontWeight.Black, color = accent,
+                letterSpacing = (4 + (1f - text.value) * 8).sp,
+                modifier = Modifier.padding(top = 10.dp).graphicsLayer { alpha = text.value },
+            )
+            Text(
+                "Smart power control",
+                fontSize = 11.sp, color = scheme.onSurfaceVariant,
+                letterSpacing = 1.6.sp,
+                modifier = Modifier.padding(top = 6.dp).graphicsLayer { alpha = text.value * 0.9f },
             )
         }
     }
 }
+
+private fun blend(a: Color, b: Color, t: Float) = Color(
+    red = a.red + (b.red - a.red) * t,
+    green = a.green + (b.green - a.green) * t,
+    blue = a.blue + (b.blue - a.blue) * t,
+    alpha = 1f,
+)
 @Composable
 fun PowerkApp() {
     val vm: StripsViewModel = viewModel()
     val focus = LocalFocusManager.current
     var splash by remember { mutableStateOf(true) }
+    // The splash owns the first frames; the heavier navigation tree composes underneath it
+    // a beat later so the cold start never drops frames while the logo animates.
+    var uiReady by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { delay(620); uiReady = true }
     LaunchedEffect(Unit) { delay(1050); splash = false }
     Ticker.Run()
     LaunchedEffect(Unit) { Diag.runLoop() }
@@ -167,7 +240,7 @@ fun PowerkApp() {
     }
     
     Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { focus.clearFocus() } }) {
-        PowerkNavigation(vm)
+        if (uiReady) PowerkNavigation(vm)
         AnimatedVisibility(splash, exit = fadeOut(tween(380, easing = FastOutSlowInEasing)) + scaleOut(tween(380, easing = FastOutSlowInEasing), targetScale = 2.4f)) {
             Splash()
         }
@@ -188,7 +261,7 @@ private fun PowerkNavigation(vm: StripsViewModel) {
         if (route == null) return@LaunchedEffect
         Diag.route = route
         Diag.i("nav", route)
-        delay(1600)
+        delay(2600)
         context.findActivity()?.let { Diag.captureScreen(it, route.substringBefore('/').substringBefore('?')) }
     }
     
@@ -201,10 +274,13 @@ private fun PowerkNavigation(vm: StripsViewModel) {
     }
     
     val items = TABS.map { DockItem(it.icon, it.label(), if (it.route == ACTIVITY) vm.unread else 0) }
+    val hazeState = rememberHazeState()
     
     CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onBackground) {
-    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        NavHost(
+    Box(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().hazeSource(hazeState)) {
+            AmbientBackdrop()
+            NavHost(
             nav,
             startDestination = HOME,
             modifier = Modifier.fillMaxSize(),
@@ -248,6 +324,7 @@ private fun PowerkNavigation(vm: StripsViewModel) {
                 RuleTypeScreen(vm, it.arguments?.getString("mac").orEmpty(), it.arguments?.getString("type").orEmpty(), onBack = { nav.popBackStack() })
             }
         }
+        }
         SnackbarHost(vm.snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = 92.dp))
         AnimatedVisibility(
             currentTab != null,
@@ -255,27 +332,81 @@ private fun PowerkNavigation(vm: StripsViewModel) {
             enter = slideInVertically(spring(0.8f, Spring.StiffnessMedium)) { it } + fadeIn(tween(160)),
             exit = slideOutVertically(tween(160)) { it } + fadeOut(tween(120)),
         ) {
-            FloatingDock(items, TABS.indexOfFirst { it.route == currentTab }, { i -> if (currentTab != TABS[i].route) goTab(TABS[i].route) })
+            FloatingDock(hazeState, items, TABS.indexOfFirst { it.route == currentTab }, { i -> if (currentTab != TABS[i].route) goTab(TABS[i].route) })
         }
     }
     }
 }
 
+/** Base surface plus two very soft ambient colour fields, drawn in a single pass. */
+@Composable
+private fun AmbientBackdrop() {
+    val scheme = MaterialTheme.colorScheme
+    val light = scheme.background.luminance() > 0.5f
+    Box(
+        Modifier.fillMaxSize().background(scheme.background).drawBehind {
+            val w = size.width
+            val h = size.height
+            drawRect(
+                Brush.radialGradient(
+                    colors = listOf(scheme.primary.copy(alpha = if (light) 0.10f else 0.17f), Color.Transparent),
+                    center = Offset(w * 0.1f, h * 0.0f),
+                    radius = maxOf(w, h) * 0.6f,
+                ),
+            )
+            drawRect(
+                Brush.radialGradient(
+                    colors = listOf(if (light) scheme.tertiary.copy(alpha = 0.07f) else scheme.primary.copy(alpha = 0.07f), Color.Transparent),
+                    center = Offset(w * 0.98f, h * 0.82f),
+                    radius = maxOf(w, h) * 0.5f,
+                ),
+            )
+        },
+    )
+}
+
 private fun isTab(e: NavBackStackEntry) = e.destination.route.tabRoute() != null
 
-private val fadeShort = tween<Float>(150)
+private fun tabIndex(e: NavBackStackEntry): Int = TABS.indexOfFirst { it.route == e.destination.route.tabRoute() }
+
+private fun tabDir(from: NavBackStackEntry, to: NavBackStackEntry): Int =
+    if (tabIndex(to) >= tabIndex(from)) 1 else -1
+
+private val tabSpring = spring<IntOffset>(dampingRatio = 0.88f, stiffness = 320f)
+private val pageSpring = spring<IntOffset>(dampingRatio = 0.92f, stiffness = 400f)
 
 private fun enterFor(from: NavBackStackEntry, to: NavBackStackEntry): EnterTransition =
-    if (isTab(from) && isTab(to)) fadeIn(fadeShort)
-    else slideInHorizontally(tween(220)) { it / 5 } + fadeIn(tween(220))
+    if (isTab(from) && isTab(to)) {
+        val dir = tabDir(from, to)
+        slideInHorizontally(tabSpring) { w -> dir * w / 4 } +
+            fadeIn(tween(200, easing = FastOutSlowInEasing)) +
+            scaleIn(tween(320, easing = FastOutSlowInEasing), initialScale = 0.94f)
+    } else {
+        slideInHorizontally(pageSpring) { w -> w / 4 } +
+            fadeIn(tween(220, easing = FastOutSlowInEasing)) +
+            scaleIn(tween(320, easing = FastOutSlowInEasing), initialScale = 0.96f)
+    }
 
 private fun exitFor(from: NavBackStackEntry, to: NavBackStackEntry): ExitTransition =
-    if (isTab(from) && isTab(to)) fadeOut(tween(100))
-    else fadeOut(tween(120))
+    if (isTab(from) && isTab(to)) {
+        val dir = tabDir(from, to)
+        slideOutHorizontally(pageSpring) { w -> -dir * w / 4 } +
+            fadeOut(tween(170)) +
+            scaleOut(tween(230, easing = FastOutSlowInEasing), targetScale = 0.97f)
+    } else {
+        fadeOut(tween(150)) + scaleOut(tween(240, easing = FastOutSlowInEasing), targetScale = 0.97f)
+    }
 
 private fun popEnterFor(from: NavBackStackEntry, to: NavBackStackEntry): EnterTransition =
-    if (isTab(from) && isTab(to)) fadeIn(fadeShort) else fadeIn(tween(180))
+    if (isTab(from) && isTab(to)) {
+        fadeIn(tween(200)) + scaleIn(tween(280, easing = FastOutSlowInEasing), initialScale = 0.96f)
+    } else {
+        fadeIn(tween(220, easing = FastOutSlowInEasing)) + scaleIn(tween(290, easing = FastOutSlowInEasing), initialScale = 0.98f)
+    }
 
 private fun popExitFor(from: NavBackStackEntry, to: NavBackStackEntry): ExitTransition =
-    if (isTab(from) && isTab(to)) fadeOut(tween(100))
-    else slideOutHorizontally(tween(200)) { it / 5 } + fadeOut(tween(200))
+    if (isTab(from) && isTab(to)) {
+        fadeOut(tween(150)) + scaleOut(tween(220, easing = FastOutSlowInEasing), targetScale = 0.98f)
+    } else {
+        slideOutHorizontally(pageSpring) { w -> w / 4 } + fadeOut(tween(210))
+    }

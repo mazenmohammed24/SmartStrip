@@ -14,45 +14,26 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import java.util.Locale
 
-/** Server URL (full https/http URL to the SmartStrip server), persisted in SharedPreferences. */
+/**
+ * Backend endpoint. Locked in the Android client: the app always talks to this server and
+ * users cannot see or change it.
+ */
 object Server {
+    /** Hardcoded SmartStrip backend. */
+    const val BASE_URL = "http://remotedsk.tplinkdns.com:3000/SmartStrip"
+
     private var prefs: SharedPreferences? = null
 
-    /** Full base URL, e.g. https://xyz.trycloudflare.com or http://192.168.1.10:4001 */
-    var serverUrl by mutableStateOf("https://notes-thinking-amendment-charitable.trycloudflare.com")
-        private set
     var token by mutableStateOf("")
         private set
 
-    /** Hostname portion for display in headers/status text. */
-    val host: String get() = runCatching { java.net.URL(serverUrl).host }.getOrElse { serverUrl }
-
     fun init(context: Context) {
-        val p = context.applicationContext.getSharedPreferences("powerk", Context.MODE_PRIVATE)
-        prefs = p
-        // Migrate legacy host+port to full URL if needed
-        val legacyHost = p.getString("host", "").orEmpty()
-        val legacyPort = p.getInt("port", 8080)
-        val storedUrl = p.getString("serverUrl", "").orEmpty()
-        serverUrl = when {
-            storedUrl.isNotBlank() -> storedUrl
-            legacyHost.isNotBlank() -> "http://$legacyHost:$legacyPort"
-            else -> "https://notes-thinking-amendment-charitable.trycloudflare.com"
-        }
-        token = p.getString("token", "").orEmpty()
+        prefs = context.applicationContext.getSharedPreferences("powerk", Context.MODE_PRIVATE)
+        token = prefs?.getString("token", "").orEmpty()
     }
 
-    fun save(newUrl: String, newToken: String) {
-        serverUrl = newUrl.trim().trimEnd('/')
-        token = newToken.trim()
-        prefs?.edit()
-            ?.putString("serverUrl", serverUrl)
-            ?.putString("token", token)
-            ?.apply()
-    }
-
-    val configured: Boolean get() = serverUrl.isNotBlank()
-    val base: String get() = serverUrl
+    val configured: Boolean get() = true
+    val base: String get() = BASE_URL
 }
 
 /** Local app appearance. This is kept on-device so the Android app can switch instantly. */

@@ -1,5 +1,5 @@
 ﻿import { Router } from 'express';
-import { listNotifications, markAllRead, markRead, removeNotification } from '../services/notificationService.js';
+import { listNotifications, markAllRead, markRead, removeAllNotifications, removeNotification } from '../services/notificationService.js';
 
 export const notificationsRoutes = Router();
 
@@ -16,6 +16,11 @@ notificationsRoutes.patch('/:id/read', async (req, res) => {
 
 notificationsRoutes.post('/read-all', async (_req, res) => {
   await markAllRead();
+  res.json({ ok: true });
+});
+
+notificationsRoutes.delete('/', async (_req, res) => {
+  await removeAllNotifications();
   res.json({ ok: true });
 });
 

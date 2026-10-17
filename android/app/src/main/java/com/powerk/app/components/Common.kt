@@ -1,6 +1,9 @@
 package com.powerk.app.components
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -16,11 +19,13 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -50,17 +55,18 @@ fun MessageCard(text: String, isError: Boolean, icon: ImageVector? = null) {
 
 @Composable
 fun EmptyState(title: String, body: String, action: String? = null, onAction: (() -> Unit)? = null) {
+    val scheme = MaterialTheme.colorScheme
     Column(
-        Modifier.fillMaxWidth().padding(top = 40.dp),
+        Modifier.fillMaxWidth().padding(top = 44.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHighest) {
-            Icon(
-                Icons.Filled.Info,
-                contentDescription = null,
-                modifier = Modifier.padding(18.dp).size(30.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        Box(
+            Modifier.size(78.dp).clip(CircleShape)
+                .background(Brush.radialGradient(listOf(scheme.primary.copy(alpha = 0.17f), Color.Transparent)))
+                .border(1.dp, scheme.outlineVariant.copy(alpha = 0.7f), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Filled.Info, contentDescription = null, modifier = Modifier.size(30.dp), tint = scheme.primary)
         }
         Spacer(Modifier.height(16.dp))
         Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)

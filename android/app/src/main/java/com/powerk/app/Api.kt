@@ -205,6 +205,14 @@ object Api {
         request("$base/api/notifications/$id", null, token, "DELETE")
     }
 
+    suspend fun clearNotifications(base: String, token: String) = withContext(Dispatchers.IO) {
+        request("$base/api/notifications", null, token, "DELETE")
+    }
+
+    suspend fun clearEvents(base: String, token: String) = withContext(Dispatchers.IO) {
+        request("$base/api/events", null, token, "DELETE")
+    }
+
     suspend fun schedules(base: String, token: String): List<ScheduleItem> = withContext(Dispatchers.IO) {
         JSONObject(request("$base/api/schedules", null, token)).optJSONArray("schedules").toList(::parseSchedule)
     }

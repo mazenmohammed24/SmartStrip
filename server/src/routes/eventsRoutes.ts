@@ -1,5 +1,5 @@
 ﻿import { Router } from 'express';
-import { listEvents } from '../services/eventService.js';
+import { clearEvents, listEvents } from '../services/eventService.js';
 
 export const eventsRoutes = Router();
 
@@ -9,4 +9,9 @@ eventsRoutes.get('/', (req, res) => {
   const before = req.query.before ? String(req.query.before) : undefined;
   const relayIndex = req.query.relayIndex !== undefined ? Number(req.query.relayIndex) : undefined;
   res.json({ events: listEvents({ stripId, relayIndex, limit, before }) });
+});
+
+eventsRoutes.delete('/', async (_req, res) => {
+  await clearEvents();
+  res.json({ ok: true });
 });

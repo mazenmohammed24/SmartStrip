@@ -1,9 +1,18 @@
 package com.powerk.app.components
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
@@ -17,6 +26,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -24,6 +34,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -35,6 +46,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -53,8 +66,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -70,6 +87,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import com.powerk.app.Link
 import java.time.Duration
 import java.time.Instant
@@ -112,13 +130,43 @@ fun VCard(
     padding: Dp = 12.dp,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val scheme = MaterialTheme.colorScheme
+    val shape = MaterialTheme.shapes.large
     Surface(
         modifier = modifier.fillMaxWidth().then(if (onClick != null) Modifier.tap(onClick = onClick) else Modifier),
-        shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        shape = shape,
+        color = Color.Transparent,
+        border = BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.9f)),
     ) {
-        Column(Modifier.padding(padding), content = content)
+        Column(
+            Modifier
+                .background(
+                    Brush.verticalGradient(
+                        listOf(scheme.surface.copy(alpha = 0.94f), scheme.surfaceContainerLow.copy(alpha = 0.86f)),
+                    ),
+                )
+                .drawBehind {
+                    // Diagonal specular sheen: light grazing across the glass pane.
+                    drawRect(
+                        Brush.linearGradient(
+                            listOf(Color.White.copy(alpha = 0.05f), Color.Transparent),
+                            start = Offset(0f, 0f),
+                            end = Offset(size.width * 0.9f, size.height * 0.85f),
+                        ),
+                    )
+                    // Hairline highlight along the top edge; makes flat dark cards feel lifted.
+                    drawLine(
+                        brush = Brush.horizontalGradient(
+                            listOf(Color.Transparent, scheme.onSurface.copy(alpha = 0.10f), Color.Transparent),
+                        ),
+                        start = Offset(0f, 0f),
+                        end = Offset(size.width, 0f),
+                        strokeWidth = 1.dp.toPx(),
+                    )
+                }
+                .padding(padding),
+            content = content,
+        )
     }
 }
 
@@ -137,14 +185,15 @@ fun Pill(text: String, tone: Tone = Tone.NEUTRAL, modifier: Modifier = Modifier,
         shape = CircleShape,
         color = bg,
         contentColor = fg,
-        border = if (outlined) BorderStroke(1.dp, fg.copy(alpha = 0.35f)) else null,
+        border = if (outlined) BorderStroke(1.dp, fg.copy(alpha = 0.3f)) else null,
         modifier = modifier,
     ) {
         Text(
             text,
-            Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+            Modifier.padding(horizontal = 9.dp, vertical = 3.5.dp),
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
+            letterSpacing = 0.2.sp,
             maxLines = 1,
             softWrap = false,
         )
@@ -194,14 +243,18 @@ fun LiveBadge(link: Link) {
 
 @Composable
 fun SectionLabel(text: String, modifier: Modifier = Modifier, color: Color = MaterialTheme.colorScheme.primary) {
-    Text(
-        text.uppercase(),
-        modifier,
-        color = color,
-        fontSize = 11.sp,
-        fontWeight = FontWeight.Bold,
-        letterSpacing = 1.2.sp,
-    )
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(width = 3.dp, height = 12.dp).clip(RoundedCornerShape(2.dp)).background(color))
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text.uppercase(),
+            color = color,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.2.sp,
+            maxLines = 1,
+        )
+    }
 }
 
 @Composable
@@ -220,10 +273,10 @@ fun IconBox(
 @Composable
 fun BackBtn(onClick: () -> Unit) {
     Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        modifier = Modifier.size(38.dp).tap(onClick = onClick),
+        modifier = Modifier.size(40.dp).tap(onClick = onClick),
     ) {
         Box(contentAlignment = Alignment.Center) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back", Modifier.size(18.dp)) }
     }
@@ -247,7 +300,14 @@ fun ScreenHeader(
         }
         Column(Modifier.weight(1f)) {
             if (eyebrow != null) SectionLabel(eyebrow)
-            Text(title, fontSize = if (eyebrow != null) 24.sp else 21.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                title,
+                fontSize = if (eyebrow != null) 26.sp else 22.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = (-0.4).sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
             if (subtitle != null) Text(subtitle, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         actions()
@@ -256,22 +316,57 @@ fun ScreenHeader(
 
 @Composable
 fun SegTabs(options: List<String>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
+    val scheme = MaterialTheme.colorScheme
+    val light = scheme.surface.luminance() > 0.5f
+    val shape = RoundedCornerShape(18.dp)
+    val thumbShape = RoundedCornerShape(14.dp)
+    val gap = 4.dp
+    val inset = 4.dp
     Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        shape = shape,
+        color = scheme.surfaceContainerLow.copy(alpha = 0.55f),
+        border = BorderStroke(1.dp, (if (light) scheme.outlineVariant else Color.White).copy(alpha = 0.26f)),
         modifier = modifier.fillMaxWidth(),
     ) {
-        Row(Modifier.padding(3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-            options.forEachIndexed { i, label ->
-                val on = i == selected
-                val bg by animateColorAsState(if (on) MaterialTheme.colorScheme.primaryContainer else Color.Transparent, tween(140), label = "seg")
-                val edge by animateColorAsState(if (on) MaterialTheme.colorScheme.primary.copy(alpha = 0.45f) else Color.Transparent, tween(140), label = "segedge")
-                val fg by animateColorAsState(if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, tween(140), label = "segfg")
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val segW = (maxWidth - inset * 2 - gap * (options.size - 1).coerceAtLeast(0)) / options.size
+            val thumbX by animateDpAsState(
+                inset + (segW + gap) * selected,
+                spring(dampingRatio = 0.8f, stiffness = 360f),
+                label = "segThumbX",
+            )
+            Box(Modifier.fillMaxWidth()) {
+                // Sliding frosted thumb.
                 Box(
-                    Modifier.weight(1f).clip(RoundedCornerShape(13.dp)).background(bg).border(1.dp, edge, RoundedCornerShape(13.dp)).tap { onSelect(i) }.padding(vertical = 8.dp),
-                    contentAlignment = Alignment.Center,
-                ) { Text(label, color = fg, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                    Modifier
+                        .offset(x = thumbX)
+                        .padding(vertical = inset)
+                        .width(segW)
+                        .height(34.dp)
+                        .clip(thumbShape)
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(scheme.primary.copy(alpha = 0.34f), scheme.primary.copy(alpha = 0.16f)),
+                            ),
+                        )
+                        .border(1.dp, scheme.primary.copy(alpha = 0.35f), thumbShape),
+                )
+                Row(Modifier.padding(inset), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                    options.forEachIndexed { i, label ->
+                        val on = i == selected
+                        val fg by animateColorAsState(
+                            if (on) scheme.primary else scheme.onSurfaceVariant,
+                            spring(stiffness = Spring.StiffnessMediumLow),
+                            label = "segfg",
+                        )
+                        Box(
+                            Modifier.weight(1f).height(34.dp).clip(thumbShape).tap { onSelect(i) },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(label, color = fg, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
             }
         }
     }
@@ -279,20 +374,60 @@ fun SegTabs(options: List<String>, selected: Int, onSelect: (Int) -> Unit, modif
 
 @Composable
 fun Shimmer(modifier: Modifier) {
+    val scheme = MaterialTheme.colorScheme
     val t = rememberInfiniteTransition(label = "shimmer")
-    val a by t.animateFloat(0.35f, 0.9f, infiniteRepeatable(tween(800), RepeatMode.Reverse), label = "a")
-    Box(modifier.clip(MaterialTheme.shapes.large).alpha(a).background(MaterialTheme.colorScheme.surfaceContainerHigh))
+    val x by t.animateFloat(0f, 1400f, infiniteRepeatable(tween(1400, easing = LinearEasing)), label = "x")
+    Box(
+        modifier.clip(MaterialTheme.shapes.large)
+            .background(scheme.surfaceContainerHigh)
+            .drawBehind {
+                drawRect(
+                    Brush.linearGradient(
+                        colors = listOf(Color.Transparent, scheme.onSurface.copy(alpha = 0.07f), Color.Transparent),
+                        start = Offset(x - 400f, 0f),
+                        end = Offset(x, size.height * 1.6f),
+                    ),
+                )
+            },
+    )
 }
 
 @Composable
 fun ConfirmDialog(title: String, text: String, confirm: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = { Text(text) },
-        confirmButton = { TextButton(onClick = { onConfirm(); onDismiss() }) { Text(confirm, color = MaterialTheme.colorScheme.error) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+    Dialog(onDismissRequest = onDismiss) {
+        val shown = remember { MutableTransitionState(false) }
+        LaunchedEffect(Unit) { shown.targetState = true }
+        AnimatedVisibility(
+            visibleState = shown,
+            enter = scaleIn(spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMediumLow), initialScale = 0.82f) + fadeIn(tween(140)),
+            exit = scaleOut(tween(130), targetScale = 0.9f) + fadeOut(tween(120)),
+        ) {
+            val scheme = MaterialTheme.colorScheme
+            Surface(
+                shape = RoundedCornerShape(28.dp),
+                color = scheme.surfaceContainerHigh,
+                contentColor = scheme.onSurface,
+                border = BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.9f)),
+                shadowElevation = 18.dp,
+            ) {
+                Column(Modifier.padding(22.dp)) {
+                    Text(title, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.3).sp)
+                    Spacer(Modifier.height(8.dp))
+                    Text(text, fontSize = 13.5.sp, lineHeight = 19.sp, color = scheme.onSurfaceVariant)
+                    Spacer(Modifier.height(20.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = onDismiss) { Text("Cancel", color = scheme.onSurfaceVariant) }
+                        Spacer(Modifier.width(6.dp))
+                        Button(
+                            onClick = { onConfirm(); onDismiss() },
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = scheme.error, contentColor = scheme.onError),
+                        ) { Text(confirm, fontWeight = FontWeight.SemiBold) }
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable

@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.DoneAll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -31,6 +32,7 @@ import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -43,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.powerk.app.NotificationItem
 import com.powerk.app.StripsViewModel
+import com.powerk.app.components.ConfirmDialog
 import com.powerk.app.components.EmptyState
 import com.powerk.app.components.SegTabs
 import com.powerk.app.components.Shimmer
@@ -53,6 +56,7 @@ import com.powerk.app.components.ago
 @Composable
 fun ActivityScreen(vm: StripsViewModel) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
+    var confirmClear by rememberSaveable { mutableStateOf(false) }
     LazyColumn(
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 104.dp),
@@ -60,7 +64,12 @@ fun ActivityScreen(vm: StripsViewModel) {
     ) {
         item(key = "header") {
             ScreenHeader("Activity", if (vm.unread > 0) "${vm.unread} unread" else "All caught up", actions = {
-                if (tab == 0 && vm.unread > 0) IconButton(onClick = { vm.markAllRead() }) { Icon(Icons.Rounded.DoneAll, "Mark all read") }
+                if (tab == 0) {
+                    if (vm.unread > 0) IconButton(onClick = { vm.markAllRead() }) { Icon(Icons.Rounded.DoneAll, "Mark all read") }
+                    if (vm.notifications.isNotEmpty()) IconButton(onClick = { confirmClear = true }) { Icon(Icons.Rounded.DeleteSweep, "Delete all alerts") }
+                } else if (vm.events.isNotEmpty()) {
+                    IconButton(onClick = { confirmClear = true }) { Icon(Icons.Rounded.DeleteSweep, "Delete all logs") }
+                }
             })
         }
         item(key = "tabs") {
@@ -73,14 +82,14 @@ fun ActivityScreen(vm: StripsViewModel) {
             } else if (vm.notifications.isEmpty()) {
                 item(key = "empty") { EmptyState("No alerts", "Overloads, offline strips and schedule results show up here.") }
             } else {
-                items(vm.notifications, key = { it.id }) { n -> AlertRow(n, vm) }
+                items(vm.notifications, key = { it.id }) { n -> Box(Modifier.animateItem()) { AlertRow(n, vm) } }
             }
         } else {
             if (vm.events.isEmpty()) {
                 item(key = "empty") { EmptyState("No activity yet", "Switching and automation events are listed here.") }
             } else {
                 items(vm.events, key = { it.id }) { e ->
-                    VCard(Modifier.fillMaxWidth(), padding = 12.dp) {
+                    VCard(Modifier.fillMaxWidth().animateItem(), padding = 12.dp) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(e.message, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -92,6 +101,15 @@ fun ActivityScreen(vm: StripsViewModel) {
                 }
             }
         }
+    }
+    if (confirmClear) {
+        ConfirmDialog(
+            title = if (tab == 0) "Delete all alerts?" else "Delete all logs?",
+            text = "This clears them on the server for every device. It can't be undone.",
+            confirm = "Delete all",
+            onConfirm = { if (tab == 0) vm.clearNotifications() else vm.clearEvents() },
+            onDismiss = { confirmClear = false },
+        )
     }
 }
 
