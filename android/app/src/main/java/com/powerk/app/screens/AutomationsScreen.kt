@@ -44,6 +44,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.powerk.app.AppSpacing
 import com.powerk.app.ScheduleItem
 import com.powerk.app.Strip
 import com.powerk.app.StripsViewModel
@@ -57,6 +58,7 @@ import com.powerk.app.components.GreenFab
 import com.powerk.app.components.IconBox
 import com.powerk.app.components.Mono
 import com.powerk.app.components.Pill
+import com.powerk.app.components.Refreshable
 import com.powerk.app.components.SaveButton
 import com.powerk.app.components.ScreenHeader
 import com.powerk.app.components.SegTabs
@@ -105,21 +107,23 @@ fun SchedulesScreen(vm: StripsViewModel, mac: String?, onBack: (() -> Unit)?) {
     }
 
     Box(Modifier.fillMaxSize()) {
-        LazyColumn(
-            Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 160.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            item(key = "header") {
-                if (onBack != null) CenteredHeader("Schedules", strip?.name ?: "Strip", onBack)
-                else ScreenHeader("Schedules", eyebrow = "Automations")
-            }
-            when {
-                !vm.loaded -> items(3, key = { "sk$it" }) { Shimmer(Modifier.fillMaxWidth().height(84.dp)) }
-                vm.strips.isEmpty() -> item(key = "nostrip") { EmptyState("No strips", "Add a strip before creating schedules.") }
-                list.isEmpty() -> item(key = "empty") { EmptyState("No schedules yet", "Switch outlets on or off automatically at a set time.") }
-                else -> items(list, key = { it.id }) { s ->
-                    ScheduleRow(s, vm.strips, showStrip = mac == null, onToggle = { vm.toggleSchedule(s) }, onEdit = { editing = s }, onDelete = { deleting = s })
+        Refreshable(vm.refreshing, { vm.refresh() }, Modifier.fillMaxSize()) {
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 160.dp),
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.listGap),
+            ) {
+                item(key = "header") {
+                    if (onBack != null) CenteredHeader("Schedules", strip?.name ?: "Strip", onBack)
+                    else ScreenHeader("Schedules", eyebrow = "Automations")
+                }
+                when {
+                    !vm.loaded -> items(3, key = { "sk$it" }) { Shimmer(Modifier.fillMaxWidth().height(84.dp)) }
+                    vm.strips.isEmpty() -> item(key = "nostrip") { EmptyState("No strips", "Add a strip before creating schedules.") }
+                    list.isEmpty() -> item(key = "empty") { EmptyState("No schedules yet", "Switch outlets on or off automatically at a set time.") }
+                    else -> items(list, key = { it.id }) { s ->
+                        ScheduleRow(s, vm.strips, showStrip = mac == null, onToggle = { vm.toggleSchedule(s) }, onEdit = { editing = s }, onDelete = { deleting = s })
+                    }
                 }
             }
         }

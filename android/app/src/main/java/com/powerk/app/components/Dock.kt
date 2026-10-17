@@ -4,6 +4,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -49,6 +51,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.powerk.app.AppElevation
+import com.powerk.app.AppReducedMotion
 import dev.chrisbanes.haze.HazeInput
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.blur.HazeBlurStyle
@@ -57,7 +61,33 @@ import dev.chrisbanes.haze.blur.hazeBlur
 
 data class DockItem(val icon: ImageVector, val label: String, val badge: Int = 0)
 
-/** Floating frosted-glass tab dock: real backdrop blur with a soft translucent tint. */
+/**
+ * Small unread-count pill shared by the dock and the rail. The ring lifts it off the
+ * frosted glass so it reads as a deliberate badge, not a warning sticker.
+ */
+@Composable
+fun NavBadge(count: Int, modifier: Modifier = Modifier) {
+    val scheme = MaterialTheme.colorScheme
+    if (count <= 0) return
+    Box(
+        modifier.height(16.dp).widthIn(min = 16.dp).clip(CircleShape)
+            .background(scheme.error)
+            .border(1.5.dp, scheme.surface.copy(alpha = 0.92f), CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            if (count > 9) "9+" else count.toString(),
+            Modifier.padding(horizontal = 4.dp),
+            fontSize = 9.5.sp,
+            lineHeight = 10.sp,
+            fontWeight = FontWeight.Bold,
+            color = scheme.onError,
+            maxLines = 1,
+        )
+    }
+}
+
+/** Floating frosted-glass tab dock: real backdrop blur with a layered depth treatment. */
 @Composable
 fun FloatingDock(
     hazeState: HazeState,
@@ -68,46 +98,80 @@ fun FloatingDock(
 ) {
     val scheme = MaterialTheme.colorScheme
     val light = scheme.surface.luminance() > 0.5f
-    val shape = RoundedCornerShape(30.dp)
+    val shape = RoundedCornerShape(28.dp)
     val frosted = HazeBlurStyle {
         blurEnabled(true)
-        blurRadius(32.dp)
+        blurRadius(36.dp)
         noiseFactor(0.012f)
         backgroundColor(Color.Transparent)
-        colorEffects(listOf(HazeColorEffect.tint(scheme.surface.copy(alpha = if (light) 0.50f else 0.34f))))
+        colorEffects(listOf(HazeColorEffect.tint(scheme.surface.copy(alpha = if (light) 0.55f else 0.38f))))
     }
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
         Box(modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 18.dp, vertical = 10.dp), contentAlignment = Alignment.BottomCenter) {
+            // Two stacked shadows: a tight contact shadow plus a wide ambient one, so the bar
+            // reads as floating above the page instead of painted onto it.
             BoxWithConstraints(
                 Modifier.widthIn(max = 420.dp).fillMaxWidth().height(66.dp)
-                    .shadow(14.dp, shape)
-                    .clip(shape)
-                    .hazeBlur(input = HazeInput.Backdrop(hazeState), style = frosted)
-                    .border(
-                        1.dp,
-                        if (light) scheme.outlineVariant.copy(alpha = 0.7f) else Color.White.copy(alpha = 0.16f),
-                        shape,
-                    ),
+                    .shadow(3.dp, shape, clip = false)
+                    .shadow(AppElevation.nav, shape, clip = false),
             ) {
                 val pad = 7.dp
                 val itemW = (maxWidth - pad * 2) / items.size
+                val reduced = AppReducedMotion
                 val pillX by animateDpAsState(
                     pad + itemW * selected.coerceAtLeast(0),
-                    spring(dampingRatio = 0.85f, stiffness = 380f),
+                    if (reduced) snap() else spring(dampingRatio = 0.85f, stiffness = 380f),
                     label = "dockPill",
                 )
-                Box(Modifier.fillMaxWidth().fillMaxHeight()) {
+                Box(
+                    Modifier.fillMaxSize()
+                        .clip(shape)
+                        .hazeBlur(input = HazeInput.Backdrop(hazeState), style = frosted)
+                        // Glass edge: brighter along the top where the light comes from.
+                        .border(
+                            1.dp,
+                            Brush.verticalGradient(
+                                listOf(
+                                    if (light) Color.White.copy(alpha = 0.70f) else Color.White.copy(alpha = 0.26f),
+                                    if (light) Color.White.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.05f),
+                                ),
+                            ),
+                            shape,
+                        ),
+                ) {
+                    // Sheen across the upper half of the glass.
                     Box(
-                        Modifier
-                            .offset(x = pillX)
-                            .padding(vertical = pad)
-                            .width(itemW)
-                            .fillMaxHeight()
-                            .clip(RoundedCornerShape(23.dp))
-                            .background(Brush.verticalGradient(listOf(scheme.primary, scheme.primary.copy(alpha = 0.85f)))),
+                        Modifier.fillMaxSize().background(
+                            Brush.verticalGradient(
+                                0f to Color.White.copy(alpha = if (light) 0.16f else 0.08f),
+                                0.55f to Color.Transparent,
+                            ),
+                        ),
                     )
-                    Row(Modifier.fillMaxWidth().fillMaxHeight().padding(horizontal = pad), horizontalArrangement = Arrangement.SpaceBetween) {
-                        items.forEachIndexed { i, item -> DockTab(item, i == selected, Modifier.width(itemW)) { onSelect(i) } }
+                    Box(Modifier.fillMaxSize()) {
+                        // Selected item: a soft accent capsule with a hairline edge and its own
+                        // small shadow — a lit tile inside the glass, not a solid paint bar.
+                        val capsule = RoundedCornerShape(20.dp)
+                        Box(
+                            Modifier
+                                .offset(x = pillX)
+                                .padding(horizontal = 3.dp, vertical = 9.dp)
+                                .width(itemW - 6.dp)
+                                .fillMaxHeight()
+                                .shadow(3.dp, capsule, clip = false)
+                                .clip(capsule)
+                                // Opaque tint: the frosted glass behind would otherwise show
+                                // through as a shifting lighter blob inside the capsule.
+                                .background(
+                                    Brush.verticalGradient(
+                                        listOf(capsuleFill(strong = true), capsuleFill()),
+                                    ),
+                                )
+                                .border(1.dp, scheme.primary.copy(alpha = 0.36f), capsule),
+                        )
+                        Row(Modifier.fillMaxWidth().fillMaxHeight().padding(horizontal = pad), horizontalArrangement = Arrangement.SpaceBetween) {
+                            items.forEachIndexed { i, item -> DockTab(item, i == selected, Modifier.width(itemW)) { onSelect(i) } }
+                        }
                     }
                 }
             }
@@ -120,9 +184,10 @@ private fun DockTab(item: DockItem, on: Boolean, modifier: Modifier, onClick: ()
     val scheme = MaterialTheme.colorScheme
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (pressed) 0.88f else 1f, spring(0.6f, Spring.StiffnessMedium), label = "dockPress")
-    val lift by animateFloatAsState(if (on) 1.08f else 1f, spring(0.6f, Spring.StiffnessMediumLow), label = "dockLift")
-    val tint by animateColorAsState(if (on) scheme.onPrimary else scheme.onSurfaceVariant, spring(stiffness = Spring.StiffnessMediumLow), label = "dockTint")
+    val reduced = AppReducedMotion
+    val scale by animateFloatAsState(if (pressed && !reduced) 0.92f else 1f, spring(0.6f, Spring.StiffnessMedium), label = "dockPress")
+    val lift by animateFloatAsState(if (on && !reduced) 1.06f else 1f, spring(0.6f, Spring.StiffnessMediumLow), label = "dockLift")
+    val tint by animateColorAsState(if (on) scheme.primary else scheme.onSurfaceVariant, spring(stiffness = Spring.StiffnessMediumLow), label = "dockTint")
     Column(
         modifier.fillMaxHeight().clickable(interactionSource = source, indication = null, onClick = onClick)
             .graphicsLayer { scaleX = scale; scaleY = scale },
@@ -130,34 +195,33 @@ private fun DockTab(item: DockItem, on: Boolean, modifier: Modifier, onClick: ()
         verticalArrangement = Arrangement.Center,
     ) {
         Box(Modifier.graphicsLayer { scaleX = lift; scaleY = lift }) {
-            Icon(item.icon, item.label, Modifier.size(22.dp), tint = tint)
+            Icon(item.icon, item.label, Modifier.size(21.dp), tint = tint)
             val badgeScale by animateFloatAsState(
                 if (item.badge > 0) 1f else 0f,
-                spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMediumLow),
+                if (reduced) snap() else spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMediumLow),
                 label = "badgePop",
             )
-            Box(
-                Modifier.align(Alignment.TopEnd).offset(x = 7.dp, y = (-4).dp)
+            NavBadge(
+                item.badge,
+                Modifier.align(Alignment.TopEnd).offset(x = 8.dp, y = (-5).dp)
                     .graphicsLayer {
                         scaleX = badgeScale
                         scaleY = badgeScale
                         alpha = badgeScale.coerceIn(0f, 1f)
                         transformOrigin = TransformOrigin.Center
                     },
-            ) {
-                Box(Modifier.background(scheme.error, CircleShape).padding(horizontal = 4.dp, vertical = 1.dp)) {
-                    Text(if (item.badge > 9) "9+" else item.badge.toString(), fontSize = 9.sp, fontWeight = FontWeight.Bold, color = scheme.onError, maxLines = 1)
-                }
-            }
+            )
         }
+        // Tight icon-over-label stack; explicit line height kills the extra font leading.
         Text(
             item.label,
             fontSize = 10.sp,
+            lineHeight = 11.sp,
             fontWeight = if (on) FontWeight.Bold else FontWeight.Medium,
             color = tint,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 2.dp),
+            modifier = Modifier.padding(top = 3.dp),
         )
     }
 }

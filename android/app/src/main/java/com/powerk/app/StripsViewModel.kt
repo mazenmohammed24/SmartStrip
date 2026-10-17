@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -83,8 +84,19 @@ class StripsViewModel : ViewModel() {
         viewModelScope.launch { sync(full = true) }
     }
 
+    /** True while a manual refresh is in flight (drives the pull-to-refresh indicator). */
+    var refreshing by mutableStateOf(false)
+        private set
+
     fun refresh() {
-        viewModelScope.launch { sync(full = true) }
+        viewModelScope.launch {
+            refreshing = true
+            try {
+                sync(full = true)
+            } finally {
+                refreshing = false
+            }
+        }
     }
 
     private fun updateLink(next: Link) {
@@ -129,7 +141,7 @@ class StripsViewModel : ViewModel() {
                 s.withOutlet(m.optInt("relayIndex") + 1) { o ->
                     val on = m.optString("state") == "on"
                     if (o.on == on) o else o.copy(on = on, changedAtMs = at)
-                }
+                }.copy(online = true)
             }
             "power-tick" -> applyTick(m)
             "settings-changed" -> applySettings(Api.parseSettings(m.getJSONObject("settings")))
@@ -177,6 +189,11 @@ class StripsViewModel : ViewModel() {
                 next
             }
             s.copy(
+                // A live telemetry frame proves the strip is reachable right now. The server's
+                // connectivity flag can lag behind a fresh registration/reconnect, and a missed
+                // "strip-connectivity" event used to leave the strip shown as offline (dead
+                // outlet controls) until the next full resync.
+                online = true,
                 outlets = outlets,
                 powerW = m.optDouble("totalWatts", s.powerW),
                 energyKwh = telemetry?.optDouble("totalEnergyKwh", s.energyKwh) ?: s.energyKwh,
@@ -340,10 +357,9 @@ class StripsViewModel : ViewModel() {
         launchApi("Delete failed") { Api.deleteRule(Server.base, Server.token, id) }
     }
 
-    fun loadEnergy(stripId: String, days: Int) {
-        viewModelScope.launch {
-            runCatching { Api.energy(Server.base, Server.token, stripId, days) }.onSuccess { energy["$days:$stripId"] = it }
-        }
+    /** Returns the job so pull-to-refresh can keep its indicator up until the report lands. */
+    fun loadEnergy(stripId: String, days: Int): Job = viewModelScope.launch {
+        runCatching { Api.energy(Server.base, Server.token, stripId, days) }.onSuccess { energy["$days:$stripId"] = it }
     }
 
     private fun reloadEnergy() {

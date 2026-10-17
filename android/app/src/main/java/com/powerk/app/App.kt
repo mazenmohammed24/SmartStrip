@@ -18,35 +18,36 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathMeasure
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.sp
 import com.powerk.app.components.DockItem
+import com.powerk.app.components.brandBoltPath
 import com.powerk.app.components.FloatingDock
+import com.powerk.app.components.NavRail
 import com.powerk.app.components.Ticker
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -72,6 +73,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -82,7 +84,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
@@ -139,85 +140,62 @@ private fun String?.tabRoute(): String? = this?.substringBefore('?')?.takeIf { r
 private fun Splash() {
     val scheme = MaterialTheme.colorScheme
     val accent = scheme.primary
-    val light = scheme.background.luminance() > 0.5f
-    val scale = remember { Animatable(0.5f) }
-    val glow = remember { Animatable(0f) }
-    val text = remember { Animatable(0f) }
-    val sheen = rememberInfiniteTransition(label = "splashSheen")
-    val angle by sheen.animateFloat(0f, 360f, infiniteRepeatable(tween(7000, easing = LinearEasing)), label = "angle")
-    LaunchedEffect(Unit) {
-        launch { scale.animateTo(1f, spring(0.55f, Spring.StiffnessLow)) }
-        launch { glow.animateTo(1f, tween(650, easing = FastOutSlowInEasing)) }
-        launch { delay(280); text.animateTo(1f, tween(450, easing = FastOutSlowInEasing)) }
-    }
-    Box(Modifier.fillMaxSize().background(scheme.background), contentAlignment = Alignment.Center) {
+    val reduced = AppReducedMotion
+    // Phases: path trace → fill → Netflix-style zoom until the mark fills the whole
+    // screen → hand over to the dashboard with a quick fade.
+    val draw = remember { Animatable(if (reduced) 1f else 0f) }
+    val fill = remember { Animatable(if (reduced) 1f else 0f) }
+    val zoom = remember { Animatable(1f) }
+    val cover = remember { Animatable(0f) }
+    BoxWithConstraints(Modifier.fillMaxSize().background(scheme.background), contentAlignment = Alignment.Center) {
+        // The mark is sized from the window (big, not a badge), then the zoom factor is
+        // computed so the bolt's bounding box passes every screen edge.
+        val mark = (minOf(maxWidth, maxHeight) * 0.58f).coerceIn(160.dp, 340.dp)
+        val coverScale = maxOf(maxWidth / (mark * 0.389f), maxHeight / (mark * 0.593f)) * 1.15f
+        LaunchedEffect(Unit) {
+            if (reduced) return@LaunchedEffect
+            launch { draw.animateTo(1f, tween(430, easing = FastOutSlowInEasing)) }
+            launch { delay(240); fill.animateTo(1f, tween(240, easing = FastOutSlowInEasing)) }
+            launch { delay(520); zoom.animateTo(coverScale, tween(520, easing = CubicBezierEasing(0.55f, 0f, 0.95f, 0.45f))) }
+            launch { delay(940); cover.animateTo(1f, tween(240, easing = LinearEasing)) }
+        }
+        // Soft accent halo that breathes with the fill and evaporates as the zoom starts.
         Box(
-            Modifier.size(380.dp).graphicsLayer { alpha = glow.value * 0.95f; scaleX = 0.7f + glow.value * 0.3f; scaleY = 0.7f + glow.value * 0.3f }
-                .background(Brush.radialGradient(listOf(accent.copy(alpha = 0.42f), accent.copy(alpha = 0.10f), Color.Transparent))),
+            Modifier.size(mark * 2.6f).graphicsLayer {
+                alpha = fill.value * (1f - cover.value) * 0.55f
+                scaleX = 0.85f + fill.value * 0.15f
+                scaleY = scaleX
+            }.background(Brush.radialGradient(listOf(accent.copy(alpha = 0.34f), Color.Transparent))),
         )
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(
-                Modifier.size(134.dp).graphicsLayer { scaleX = scale.value; scaleY = scale.value; alpha = (scale.value * 1.6f - 0.6f).coerceIn(0f, 1f) },
-                contentAlignment = Alignment.Center,
-            ) {
-                // Glass disc that picks up the user's accent colour.
-                Box(
-                    Modifier.fillMaxSize().clip(CircleShape)
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(
-                                    Color.White.copy(alpha = if (light) 0.55f else 0.16f),
-                                    accent.copy(alpha = 0.30f),
-                                    scheme.surface.copy(alpha = 0.50f),
-                                ),
-                            ),
-                        )
-                        .border(1.dp, Brush.linearGradient(listOf(Color.White.copy(alpha = 0.65f), accent.copy(alpha = 0.40f), Color.White.copy(alpha = 0.10f))), CircleShape),
-                )
-                // Slow rotating sheen, like light travelling across curved glass.
-                Box(
-                    Modifier.fillMaxSize().clip(CircleShape).graphicsLayer { rotationZ = angle }.drawBehind {
-                        drawRect(
-                            Brush.linearGradient(
-                                listOf(Color.Transparent, Color.White.copy(alpha = if (light) 0.30f else 0.14f), Color.Transparent),
-                                start = Offset.Zero,
-                                end = Offset(size.width, size.height),
-                            ),
-                        )
-                    },
-                )
-                // The brand bolt (same path as ic_launcher_foreground), filled with the accent gradient.
-                Canvas(Modifier.size(76.dp)) {
-                    val k = size.minDimension / 108f
-                    val bolt = Path().apply {
-                        moveTo(61f * k, 22f * k); lineTo(33f * k, 62f * k); lineTo(51f * k, 62f * k)
-                        lineTo(47f * k, 86f * k); lineTo(75f * k, 46f * k); lineTo(57f * k, 46f * k); close()
-                    }
-                    drawPath(bolt, Brush.linearGradient(listOf(blend(accent, Color.White, 0.55f), accent)))
+        Box(Modifier.size(mark).graphicsLayer { scaleX = zoom.value; scaleY = zoom.value }) {
+            Canvas(Modifier.fillMaxSize()) {
+                val path = brandBoltPath(size)
+                val d = draw.value
+                if (d < 1f) {
+                    // Trace the bolt outline as a rounded stroke, like it is being drawn.
+                    val measure = PathMeasure().apply { setPath(path, false) }
+                    val segment = Path()
+                    measure.getSegment(0f, measure.length * d, segment, true)
+                    drawPath(
+                        segment,
+                        accent,
+                        style = Stroke(width = size.minDimension * 0.045f, cap = StrokeCap.Round, join = StrokeJoin.Round),
+                    )
+                } else {
+                    drawPath(
+                        path,
+                        Brush.linearGradient(listOf(lerp(accent, Color.White, 0.30f), accent)),
+                        alpha = fill.value,
+                    )
                 }
             }
-            Text(
-                stringResource(R.string.app_name).uppercase(),
-                fontSize = 22.sp, fontWeight = FontWeight.Black, color = accent,
-                letterSpacing = (4 + (1f - text.value) * 8).sp,
-                modifier = Modifier.padding(top = 10.dp).graphicsLayer { alpha = text.value },
-            )
-            Text(
-                "Smart power control",
-                fontSize = 11.sp, color = scheme.onSurfaceVariant,
-                letterSpacing = 1.6.sp,
-                modifier = Modifier.padding(top = 6.dp).graphicsLayer { alpha = text.value * 0.9f },
-            )
         }
+        // Seals the bolt's silhouette notches into one clean accent field at the end of
+        // the zoom, so the hand-over to the dashboard is seamless on any screen shape.
+        Box(Modifier.matchParentSize().graphicsLayer { alpha = cover.value }.background(accent))
     }
 }
 
-private fun blend(a: Color, b: Color, t: Float) = Color(
-    red = a.red + (b.red - a.red) * t,
-    green = a.green + (b.green - a.green) * t,
-    blue = a.blue + (b.blue - a.blue) * t,
-    alpha = 1f,
-)
 @Composable
 fun PowerkApp() {
     val vm: StripsViewModel = viewModel()
@@ -226,8 +204,10 @@ fun PowerkApp() {
     // The splash owns the first frames; the heavier navigation tree composes underneath it
     // a beat later so the cold start never drops frames while the logo animates.
     var uiReady by remember { mutableStateOf(false) }
+    val splashReduced = AppReducedMotion
     LaunchedEffect(Unit) { delay(620); uiReady = true }
-    LaunchedEffect(Unit) { delay(1050); splash = false }
+    // Long enough for trace + fill + full-screen zoom; near-instant in reduced motion.
+    LaunchedEffect(Unit) { delay(if (splashReduced) 420L else 1210L); splash = false }
     Ticker.Run()
     LaunchedEffect(Unit) { Diag.runLoop() }
     DisposableEffect(Unit) {
@@ -241,7 +221,7 @@ fun PowerkApp() {
     
     Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { focus.clearFocus() } }) {
         if (uiReady) PowerkNavigation(vm)
-        AnimatedVisibility(splash, exit = fadeOut(tween(380, easing = FastOutSlowInEasing)) + scaleOut(tween(380, easing = FastOutSlowInEasing), targetScale = 2.4f)) {
+        AnimatedVisibility(splash, exit = fadeOut(tween(260, easing = FastOutSlowInEasing))) {
             Splash()
         }
     }
@@ -275,19 +255,32 @@ private fun PowerkNavigation(vm: StripsViewModel) {
     
     val items = TABS.map { DockItem(it.icon, it.label(), if (it.route == ACTIVITY) vm.unread else 0) }
     val hazeState = rememberHazeState()
+    val reducedMotion = AppReducedMotion
+    // The rail keeps the owning tab highlighted while a detail screen is open.
+    var railIndex by remember { mutableIntStateOf(0) }
+    LaunchedEffect(currentTab) {
+        val i = TABS.indexOfFirst { it.route == currentTab }
+        if (i >= 0) railIndex = i
+    }
     
     CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onBackground) {
-    Box(Modifier.fillMaxSize()) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        // Adaptive shell: wide windows get a persistent navigation rail; compact ones keep
+        // the floating dock. Content lives in a single NavHost in both cases so resizing
+        // never recreates screens or loses navigation state.
+        val expanded = maxWidth >= 600.dp
+        val railPad by animateDpAsState(if (expanded) 100.dp else 0.dp, tween(240, easing = FastOutSlowInEasing), label = "railPad")
+        Box(Modifier.fillMaxSize().padding(start = railPad)) {
         Box(Modifier.fillMaxSize().hazeSource(hazeState)) {
             AmbientBackdrop()
             NavHost(
             nav,
             startDestination = HOME,
             modifier = Modifier.fillMaxSize(),
-            enterTransition = { enterFor(initialState, targetState) },
-            exitTransition = { exitFor(initialState, targetState) },
-            popEnterTransition = { popEnterFor(initialState, targetState) },
-            popExitTransition = { popExitFor(initialState, targetState) },
+            enterTransition = { enterFor(initialState, targetState, reducedMotion) },
+            exitTransition = { exitFor(initialState, targetState, reducedMotion) },
+            popEnterTransition = { popEnterFor(initialState, targetState, reducedMotion) },
+            popExitTransition = { popExitFor(initialState, targetState, reducedMotion) },
         ) {
             composable(HOME) {
                 HomeScreen(
@@ -325,14 +318,23 @@ private fun PowerkNavigation(vm: StripsViewModel) {
             }
         }
         }
-        SnackbarHost(vm.snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = 92.dp))
+        SnackbarHost(vm.snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = if (expanded) 20.dp else 92.dp))
         AnimatedVisibility(
-            currentTab != null,
+            !expanded && currentTab != null,
             Modifier.align(Alignment.BottomCenter),
             enter = slideInVertically(spring(0.8f, Spring.StiffnessMedium)) { it } + fadeIn(tween(160)),
             exit = slideOutVertically(tween(160)) { it } + fadeOut(tween(120)),
         ) {
             FloatingDock(hazeState, items, TABS.indexOfFirst { it.route == currentTab }, { i -> if (currentTab != TABS[i].route) goTab(TABS[i].route) })
+        }
+        }
+        AnimatedVisibility(
+            expanded,
+            Modifier.align(Alignment.CenterStart),
+            enter = slideInHorizontally(spring(0.85f, Spring.StiffnessMediumLow)) { -it } + fadeIn(tween(180)),
+            exit = slideOutHorizontally(tween(180)) { -it } + fadeOut(tween(120)),
+        ) {
+            NavRail(items, railIndex, onSelect = { i -> if (currentTab != TABS[i].route) goTab(TABS[i].route) })
         }
     }
     }
@@ -361,6 +363,13 @@ private fun AmbientBackdrop() {
                     radius = maxOf(w, h) * 0.5f,
                 ),
             )
+            // Soft floor vignette: gives the page a ground plane so lifted cards read above it.
+            drawRect(
+                Brush.verticalGradient(
+                    0.55f to Color.Transparent,
+                    1f to (if (light) scheme.onSurface.copy(alpha = 0.04f) else Color.Black.copy(alpha = 0.22f)),
+                ),
+            )
         },
     )
 }
@@ -375,8 +384,10 @@ private fun tabDir(from: NavBackStackEntry, to: NavBackStackEntry): Int =
 private val tabSpring = spring<IntOffset>(dampingRatio = 0.88f, stiffness = 320f)
 private val pageSpring = spring<IntOffset>(dampingRatio = 0.92f, stiffness = 400f)
 
-private fun enterFor(from: NavBackStackEntry, to: NavBackStackEntry): EnterTransition =
-    if (isTab(from) && isTab(to)) {
+private fun enterFor(from: NavBackStackEntry, to: NavBackStackEntry, reduced: Boolean): EnterTransition =
+    if (reduced) {
+        fadeIn(tween(140))
+    } else if (isTab(from) && isTab(to)) {
         val dir = tabDir(from, to)
         slideInHorizontally(tabSpring) { w -> dir * w / 4 } +
             fadeIn(tween(200, easing = FastOutSlowInEasing)) +
@@ -387,8 +398,10 @@ private fun enterFor(from: NavBackStackEntry, to: NavBackStackEntry): EnterTrans
             scaleIn(tween(320, easing = FastOutSlowInEasing), initialScale = 0.96f)
     }
 
-private fun exitFor(from: NavBackStackEntry, to: NavBackStackEntry): ExitTransition =
-    if (isTab(from) && isTab(to)) {
+private fun exitFor(from: NavBackStackEntry, to: NavBackStackEntry, reduced: Boolean): ExitTransition =
+    if (reduced) {
+        fadeOut(tween(110))
+    } else if (isTab(from) && isTab(to)) {
         val dir = tabDir(from, to)
         slideOutHorizontally(pageSpring) { w -> -dir * w / 4 } +
             fadeOut(tween(170)) +
@@ -397,15 +410,19 @@ private fun exitFor(from: NavBackStackEntry, to: NavBackStackEntry): ExitTransit
         fadeOut(tween(150)) + scaleOut(tween(240, easing = FastOutSlowInEasing), targetScale = 0.97f)
     }
 
-private fun popEnterFor(from: NavBackStackEntry, to: NavBackStackEntry): EnterTransition =
-    if (isTab(from) && isTab(to)) {
+private fun popEnterFor(from: NavBackStackEntry, to: NavBackStackEntry, reduced: Boolean): EnterTransition =
+    if (reduced) {
+        fadeIn(tween(140))
+    } else if (isTab(from) && isTab(to)) {
         fadeIn(tween(200)) + scaleIn(tween(280, easing = FastOutSlowInEasing), initialScale = 0.96f)
     } else {
         fadeIn(tween(220, easing = FastOutSlowInEasing)) + scaleIn(tween(290, easing = FastOutSlowInEasing), initialScale = 0.98f)
     }
 
-private fun popExitFor(from: NavBackStackEntry, to: NavBackStackEntry): ExitTransition =
-    if (isTab(from) && isTab(to)) {
+private fun popExitFor(from: NavBackStackEntry, to: NavBackStackEntry, reduced: Boolean): ExitTransition =
+    if (reduced) {
+        fadeOut(tween(110))
+    } else if (isTab(from) && isTab(to)) {
         fadeOut(tween(150)) + scaleOut(tween(220, easing = FastOutSlowInEasing), targetScale = 0.98f)
     } else {
         slideOutHorizontally(pageSpring) { w -> w / 4 } + fadeOut(tween(210))

@@ -59,6 +59,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.powerk.app.AppSpacing
 import com.powerk.app.RuleItem
 import com.powerk.app.Strip
 import com.powerk.app.StripsViewModel
@@ -69,6 +70,7 @@ import com.powerk.app.components.EmptyState
 import com.powerk.app.components.IconBox
 import com.powerk.app.components.Mono
 import com.powerk.app.components.Pill
+import com.powerk.app.components.Refreshable
 import com.powerk.app.components.ScreenHeader
 import com.powerk.app.components.SectionLabel
 import com.powerk.app.components.SegTabs
@@ -152,17 +154,19 @@ private fun StripChips(vm: StripsViewModel, selected: String, onSelect: (String)
 fun AutomationHubScreen(vm: StripsViewModel, onBack: () -> Unit, onOpen: (String) -> Unit) {
     var mac by remember { mutableStateOf(vm.strips.firstOrNull()?.mac.orEmpty()) }
     val strip = vm.strips.firstOrNull { it.mac == mac } ?: vm.strips.firstOrNull()
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 0.dp)) {
-        ScreenHeader("Automations", "Rules that run on the server", onBack = onBack, eyebrow = "Rules")
-        if (strip == null) {
-            EmptyState("No strips yet", "Add a strip to create automations.")
-            return@Column
-        }
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(bottom = 24.dp)) {
-            StripChips(vm, strip.mac) { mac = it }
-            RULE_KINDS.forEach { k ->
-                val n = vm.rules.count { it.stripId == strip.mac && it.type == k.type }
-                MenuCard(k.icon, k.title, k.blurb, n.takeIf { it > 0 }?.toString()) { onOpen("rule/${k.type}/${android.net.Uri.encode(strip.mac)}") }
+    Refreshable(vm.refreshing, { vm.refresh() }, Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 0.dp)) {
+            ScreenHeader("Automations", "Rules that run on the server", onBack = onBack, eyebrow = "Rules")
+            if (strip == null) {
+                EmptyState("No strips yet", "Add a strip to create automations.")
+                return@Column
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.listGap), modifier = Modifier.padding(bottom = 24.dp)) {
+                StripChips(vm, strip.mac) { mac = it }
+                RULE_KINDS.forEach { k ->
+                    val n = vm.rules.count { it.stripId == strip.mac && it.type == k.type }
+                    MenuCard(k.icon, k.title, k.blurb, n.takeIf { it > 0 }?.toString()) { onOpen("rule/${k.type}/${android.net.Uri.encode(strip.mac)}") }
+                }
             }
         }
     }
@@ -175,7 +179,7 @@ fun StripMenuScreen(vm: StripsViewModel, mac: String, onBack: () -> Unit, onOpen
     val enc = android.net.Uri.encode(mac)
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
         ScreenHeader(strip?.name ?: "Strip", "Strip settings & tools", onBack = onBack)
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(bottom = 24.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.listGap), modifier = Modifier.padding(bottom = 24.dp)) {
             SectionLabel("Automation", Modifier.padding(top = 8.dp), MaterialTheme.colorScheme.onSurfaceVariant)
             MenuCard(Icons.Rounded.Schedule, "Schedules", "Turn outlets on or off on a timetable") { onOpen("schedules/$enc") }
             RULE_KINDS.forEach { k ->
@@ -200,7 +204,7 @@ fun RoomDialog(vm: StripsViewModel, strip: Strip, onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         title = { Text("Room for ${strip.name}") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.listGap)) {
                 if (rooms.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     rooms.forEach { r -> FilterChip(selected = draft == r, onClick = { draft = r }, label = { Text(r) }) }
                 }
@@ -218,38 +222,40 @@ fun RoomsScreen(vm: StripsViewModel, onBack: () -> Unit) {
     val unassigned = "Unassigned"
     val rooms = vm.strips.groupBy { it.location?.trim()?.ifBlank { null } ?: unassigned }
         .toList().sortedWith(compareBy({ it.first == unassigned }, { it.first }))
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
-        ScreenHeader("Rooms", "Group strips by where they live", onBack = onBack, eyebrow = "Home")
-        if (vm.strips.isEmpty()) EmptyState("No rooms yet", "Add a strip, then group it into a room.")
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(bottom = 24.dp)) {
-            rooms.forEach { (name, strips) ->
-                VCard {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(name, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                            Text(
-                                "${strips.size} strip${if (strips.size == 1) "" else "s"} · ${com.powerk.app.components.fmtW(strips.sumOf { it.powerW })}",
-                                fontFamily = Mono, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        TextButton(onClick = { strips.filter { it.online }.forEach { vm.command(it.mac, 0, true) } }) { Text("All on") }
-                        TextButton(onClick = { strips.filter { it.online }.forEach { vm.command(it.mac, 0, false) } }) { Text("All off") }
-                    }
-                    strips.forEach { s ->
-                        Row(
-                            Modifier.fillMaxWidth().tap { moving = s }.padding(vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(com.powerk.app.components.iconGlyph(s.icon), fontSize = 20.sp)
-                            Spacer(Modifier.size(10.dp))
+    Refreshable(vm.refreshing, { vm.refresh() }, Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
+            ScreenHeader("Rooms", "Group strips by where they live", onBack = onBack, eyebrow = "Home")
+            if (vm.strips.isEmpty()) EmptyState("No rooms yet", "Add a strip, then group it into a room.")
+            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.listGap), modifier = Modifier.padding(bottom = 24.dp)) {
+                rooms.forEach { (name, strips) ->
+                    VCard {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
-                                Text(s.name, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                Text(name, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                                 Text(
-                                    "${s.outlets.count { it.on }}/${s.outlets.size} on · ${com.powerk.app.components.fmtW(s.powerW)}",
+                                    "${strips.size} strip${if (strips.size == 1) "" else "s"} · ${com.powerk.app.components.fmtW(strips.sumOf { it.powerW })}",
                                     fontFamily = Mono, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
-                            Pill(if (s.online) "Online" else "Offline", if (s.online) Tone.GOOD else Tone.BAD, outlined = true)
+                            TextButton(onClick = { strips.filter { it.online }.forEach { vm.command(it.mac, 0, true) } }) { Text("All on") }
+                            TextButton(onClick = { strips.filter { it.online }.forEach { vm.command(it.mac, 0, false) } }) { Text("All off") }
+                        }
+                        strips.forEach { s ->
+                            Row(
+                                Modifier.fillMaxWidth().tap { moving = s }.padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(com.powerk.app.components.iconGlyph(s.icon), fontSize = 20.sp)
+                                Spacer(Modifier.size(10.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(s.name, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                    Text(
+                                        "${s.outlets.count { it.on }}/${s.outlets.size} on · ${com.powerk.app.components.fmtW(s.powerW)}",
+                                        fontFamily = Mono, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                Pill(if (s.online) "Online" else "Offline", if (s.online) Tone.GOOD else Tone.BAD, outlined = true)
+                            }
                         }
                     }
                 }

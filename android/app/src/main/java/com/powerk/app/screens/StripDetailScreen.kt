@@ -19,13 +19,11 @@ import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -39,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.powerk.app.AppSpacing
 import com.powerk.app.Outlet
 import com.powerk.app.Strip
 import com.powerk.app.StripsViewModel
@@ -48,12 +47,13 @@ import com.powerk.app.components.IconPickerMenu
 import com.powerk.app.components.MasterButton
 import com.powerk.app.components.Mono
 import com.powerk.app.components.Pill
+import com.powerk.app.components.Refreshable
+import com.powerk.app.components.RenameDialog
 import com.powerk.app.components.ScreenHeader
 import com.powerk.app.components.SectionLabel
 import com.powerk.app.components.Stat
 import com.powerk.app.components.Tone
 import com.powerk.app.components.VCard
-import com.powerk.app.components.VTextField
 import com.powerk.app.components.WifiBars
 import com.powerk.app.components.tap
 import com.powerk.app.components.fmtKwh
@@ -80,59 +80,61 @@ fun StripDetailScreen(
     var stripPicker by remember { mutableStateOf(false) }
     val schedules = vm.schedules.count { it.stripId == strip.mac }
 
-    LazyColumn(
-        Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        item(key = "header") {
-            ScreenHeader(
-                strip.name,
-                strip.model.ifBlank { null },
-                onBack = onBack,
-                actions = {
-                    Box {
-                        IconButton(onClick = { stripPicker = true }) { Text(iconGlyph(strip.icon), fontSize = 20.sp) }
-                        IconPickerMenu(stripPicker, strip.icon, { stripPicker = false }) { stripPicker = false; vm.updateIcon(strip.mac, null, it) }
-                    }
-                    IconButton(onClick = { renaming = true }) { Icon(Icons.Rounded.Edit, "Rename") }
-                },
-            )
-        }
-        item(key = "power") {
-            VCard {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Power now", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(fmtW(strip.powerW), fontFamily = Mono, fontSize = 26.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                    }
-                    Pill(if (strip.online) "Online" else "Offline", if (strip.online) Tone.GOOD else Tone.BAD)
-                    Spacer(Modifier.width(10.dp))
-                    MasterButton(strip.on, strip.online, { vm.command(strip.mac, 0, !strip.on) }, 48.dp)
-                }
-                Spacer(Modifier.height(14.dp))
-                Row { Stat("Voltage", strip.voltage?.let { "${fmtNum(it, 0)} V" } ?: "—"); Stat("Current", strip.currentA?.let { "${fmtNum(it, 2)} A" } ?: "—"); Stat("Energy", "${fmtKwh(strip.energyKwh)} kWh") }
-                Spacer(Modifier.height(10.dp))
-                Row { Column(Modifier.weight(1f)) { Text("Signal", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1); Spacer(Modifier.height(3.dp)); WifiBars(strip.rssi, active = strip.online) }; Stat("Firmware", strip.fw.ifBlank { "—" }); Stat("ID", "…" + strip.mac.takeLast(4)) }
+    Refreshable(vm.refreshing, { vm.refresh() }, Modifier.fillMaxSize()) {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.listGap),
+        ) {
+            item(key = "header") {
+                ScreenHeader(
+                    strip.name,
+                    strip.model.ifBlank { null },
+                    onBack = onBack,
+                    actions = {
+                        Box {
+                            IconButton(onClick = { stripPicker = true }) { Text(iconGlyph(strip.icon), fontSize = 20.sp) }
+                            IconPickerMenu(stripPicker, strip.icon, { stripPicker = false }) { stripPicker = false; vm.updateIcon(strip.mac, null, it) }
+                        }
+                        IconButton(onClick = { renaming = true }) { Icon(Icons.Rounded.Edit, "Rename") }
+                    },
+                )
             }
-        }
-        item(key = "outlets-label") { SectionLabel("Outlets") }
-        items(strip.outlets, key = { "o${it.n}" }) { o -> OutletRow(strip, o, vm) }
-        item(key = "auto-label") { SectionLabel("Automation & energy") }
-        item(key = "energy") { LinkRow(Icons.Rounded.BarChart, "Consumption", "Daily energy and cost", onEnergy) }
-        item(key = "schedules") { LinkRow(Icons.Rounded.AccessTime, "Schedules", if (schedules == 0) "None yet" else "$schedules active", onSchedules) }
-        item(key = "danger") {
-            VCard(onClick = { deleting = true }) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.Delete, null, tint = MaterialTheme.colorScheme.error)
-                    Spacer(Modifier.width(12.dp))
-                    Text("Remove strip", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.SemiBold)
+            item(key = "power") {
+                VCard {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Power now", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(fmtW(strip.powerW), fontFamily = Mono, fontSize = 26.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        }
+                        Pill(if (strip.online) "Online" else "Offline", if (strip.online) Tone.GOOD else Tone.BAD)
+                        Spacer(Modifier.width(10.dp))
+                        MasterButton(strip.on, strip.online, { vm.command(strip.mac, 0, !strip.on) }, 48.dp)
+                    }
+                    Spacer(Modifier.height(14.dp))
+                    Row { Stat("Voltage", strip.voltage?.let { "${fmtNum(it, 0)} V" } ?: "—"); Stat("Current", strip.currentA?.let { "${fmtNum(it, 2)} A" } ?: "—"); Stat("Energy", "${fmtKwh(strip.energyKwh)} kWh") }
+                    Spacer(Modifier.height(10.dp))
+                    Row { Column(Modifier.weight(1f)) { Text("Signal", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1); Spacer(Modifier.height(3.dp)); WifiBars(strip.rssi, active = strip.online) }; Stat("Firmware", strip.fw.ifBlank { "—" }); Stat("ID", "…" + strip.mac.takeLast(4)) }
+                }
+            }
+            item(key = "outlets-label") { SectionLabel("Outlets") }
+            items(strip.outlets, key = { "o${it.n}" }) { o -> OutletRow(strip, o, vm) }
+            item(key = "auto-label") { SectionLabel("Automation & energy") }
+            item(key = "energy") { LinkRow(Icons.Rounded.BarChart, "Consumption", "Daily energy and cost", onEnergy) }
+            item(key = "schedules") { LinkRow(Icons.Rounded.AccessTime, "Schedules", if (schedules == 0) "None yet" else "$schedules active", onSchedules) }
+            item(key = "danger") {
+                VCard(onClick = { deleting = true }) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.Delete, null, tint = MaterialTheme.colorScheme.error)
+                        Spacer(Modifier.width(12.dp))
+                        Text("Remove strip", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.SemiBold)
+                    }
                 }
             }
         }
     }
 
-    if (renaming) RenameDialog(strip.name, { renaming = false }) { vm.renameStrip(strip.mac, it) }
+    if (renaming) RenameDialog(strip.name, "Rename strip", { renaming = false }) { vm.renameStrip(strip.mac, it) }
     if (deleting) ConfirmDialog("Remove ${strip.name}?", "The strip and its schedules are deleted from the server.", "Remove", { vm.deleteStrip(strip.mac) { onBack() } }, { deleting = false })
 }
 
@@ -177,14 +179,3 @@ private fun LinkRow(icon: ImageVector, title: String, subtitle: String, onClick:
     }
 }
 
-@Composable
-private fun RenameDialog(current: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
-    var name by remember { mutableStateOf(current) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Rename strip") },
-        text = { VTextField(name, { name = it }, "Name") },
-        confirmButton = { TextButton(enabled = name.isNotBlank(), onClick = { onSave(name.trim()); onDismiss() }) { Text("Save") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}

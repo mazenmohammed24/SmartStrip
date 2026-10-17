@@ -1,5 +1,7 @@
 package com.powerk.app
 
+import android.os.Build
+import android.provider.Settings
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
@@ -7,16 +9,25 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.Shapes
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.material3.Typography
 
 val PlexSans = FontFamily(
     Font(R.font.ibm_plex_sans_regular, FontWeight.Normal),
@@ -60,6 +71,104 @@ private val PowerkShapes = Shapes(
     large = RoundedCornerShape(22.dp),
     extraLarge = RoundedCornerShape(28.dp),
 )
+
+// ---------------------------------------------------------------------------
+// Semantic colors — success and warning keep their meaning regardless of the
+// accent palette, so status is never encoded by the brand colour alone.
+// ---------------------------------------------------------------------------
+
+@Immutable
+data class PowerkSemanticColors(
+    val success: Color,
+    val onSuccess: Color,
+    val successContainer: Color,
+    val onSuccessContainer: Color,
+    val warning: Color,
+    val onWarning: Color,
+    val warningContainer: Color,
+    val onWarningContainer: Color,
+)
+
+val LightSemanticColors = PowerkSemanticColors(
+    success = Color(0xFF15803D),
+    onSuccess = Color.White,
+    successContainer = Color(0xFFDCFCE7),
+    onSuccessContainer = Color(0xFF14532D),
+    warning = Color(0xFFB45309),
+    onWarning = Color.White,
+    warningContainer = Color(0xFFFEF3C7),
+    onWarningContainer = Color(0xFF78350F),
+)
+
+val DarkSemanticColors = PowerkSemanticColors(
+    success = Color(0xFF34D399),
+    onSuccess = Color(0xFF042118),
+    successContainer = Color(0xFF10291F),
+    onSuccessContainer = Color(0xFFA7F3D0),
+    warning = Color(0xFFFBBF24),
+    onWarning = Color(0xFF2A1D02),
+    warningContainer = Color(0xFF33280D),
+    onWarningContainer = Color(0xFFFDE68A),
+)
+
+val LocalPowerkSemanticColors = staticCompositionLocalOf { DarkSemanticColors }
+
+/** Short accessor for the component kit. */
+val AppSemantic: PowerkSemanticColors
+    @Composable @ReadOnlyComposable get() = LocalPowerkSemanticColors.current
+
+// ---------------------------------------------------------------------------
+// Spacing / density tokens.
+// ---------------------------------------------------------------------------
+
+@Immutable
+data class PowerkSpacing(val listGap: Dp, val sectionGap: Dp, val screenPad: Dp)
+
+val ComfortableSpacing = PowerkSpacing(listGap = 10.dp, sectionGap = 14.dp, screenPad = 14.dp)
+val CompactSpacing = PowerkSpacing(listGap = 6.dp, sectionGap = 10.dp, screenPad = 10.dp)
+
+val LocalPowerkSpacing = staticCompositionLocalOf { ComfortableSpacing }
+
+val AppSpacing: PowerkSpacing
+    @Composable @ReadOnlyComposable get() = LocalPowerkSpacing.current
+
+fun spacingFor(density: String): PowerkSpacing =
+    if (density == AppTheme.COMPACT) CompactSpacing else ComfortableSpacing
+
+// ---------------------------------------------------------------------------
+// Depth tokens: one ladder for every lifted surface, so the whole app reads
+// with the same lighting. Pair with `Modifier.appShadow` (components/Kit.kt).
+// ---------------------------------------------------------------------------
+
+object AppElevation {
+    /** Cards resting on the page. */
+    val card = 3.dp
+
+    /** Interactive/featured cards (strip tiles). */
+    val cardRaised = 5.dp
+
+    /** Floating controls: FAB, segmented-control thumb, dock indicator. */
+    val floating = 10.dp
+
+    /** Glass navigation surfaces (dock, rail). */
+    val nav = 18.dp
+
+    /** Dialogs, sheets and overlays. */
+    val overlay = 22.dp
+}
+
+// ---------------------------------------------------------------------------
+// Motion.
+// ---------------------------------------------------------------------------
+
+val LocalReducedMotion = staticCompositionLocalOf { false }
+
+val AppReducedMotion: Boolean
+    @Composable @ReadOnlyComposable get() = LocalReducedMotion.current
+
+/** Pure policy (unit-tested): Material You requires Android 12+. */
+fun useDynamicScheme(requested: Boolean, sdkInt: Int): Boolean =
+    requested && sdkInt >= Build.VERSION_CODES.S
 
 private fun parseColor(hex: String): Color {
     val value = hex.removePrefix("#").toLongOrNull(16) ?: 0x1AA34A
@@ -142,13 +251,34 @@ fun PowerkTheme(
         else -> isSystemInDarkTheme()
     },
     accentHex: String = AppTheme.accentColor,
+    dynamicColor: Boolean = AppTheme.dynamicColor,
+    reducedMotion: Boolean = AppTheme.reducedMotion,
     content: @Composable () -> Unit,
 ) {
-    MaterialExpressiveTheme(
-        colorScheme = powerkScheme(dark, accentHex),
-        motionScheme = MotionScheme.expressive(),
-        shapes = PowerkShapes,
-        typography = PowerkTypography,
-        content = content,
-    )
+    val context = LocalContext.current
+    val scheme = if (useDynamicScheme(dynamicColor, Build.VERSION.SDK_INT)) {
+        if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+    } else {
+        powerkScheme(dark, accentHex)
+    }
+    // Also honour the system-wide "remove animations" accessibility setting.
+    val systemNoAnim = remember(context) {
+        runCatching {
+            Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
+        }.getOrDefault(false)
+    }
+    val reduced = reducedMotion || systemNoAnim
+    CompositionLocalProvider(
+        LocalPowerkSemanticColors provides if (dark) DarkSemanticColors else LightSemanticColors,
+        LocalPowerkSpacing provides spacingFor(AppTheme.density),
+        LocalReducedMotion provides reduced,
+    ) {
+        MaterialExpressiveTheme(
+            colorScheme = scheme,
+            motionScheme = if (reduced) MotionScheme.standard() else MotionScheme.expressive(),
+            shapes = PowerkShapes,
+            typography = PowerkTypography,
+            content = content,
+        )
+    }
 }

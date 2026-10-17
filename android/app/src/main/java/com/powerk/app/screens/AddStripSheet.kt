@@ -50,7 +50,9 @@ fun AddStripSheet(vm: StripsViewModel, onDismiss: () -> Unit) {
             Box(Modifier.size(10.dp))
             Box(Modifier.weight(1f)) {
                 if (tab == 0) ScanScreen(onStripAdopted = { vm.refresh(); onDismiss() })
-                else Column(Modifier.verticalScroll(rememberScrollState())) { ProvisionWizardPanel() }
+                // Done in the wizard closes the whole sheet and refreshes the dashboard, so the
+                // new strip (and its live state) is on screen the moment the user lands back.
+                else Column(Modifier.verticalScroll(rememberScrollState())) { ProvisionWizardPanel(onDone = { vm.refresh(); onDismiss() }) }
             }
         }
     }

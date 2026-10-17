@@ -42,10 +42,24 @@ object AppTheme {
     const val LIGHT = "light"
     const val DARK = "dark"
     const val DEFAULT_ACCENT = "#1AA34A"
+    const val COMFORTABLE = "comfortable"
+    const val COMPACT = "compact"
 
     var mode by mutableStateOf(SYSTEM)
         private set
     var accentColor by mutableStateOf(DEFAULT_ACCENT)
+        private set
+
+    /** Material You: follow wallpaper colors instead of the brand accent (Android 12+). */
+    var dynamicColor by mutableStateOf(false)
+        private set
+
+    /** Trim decorative animation; the system animator scale can also force this on. */
+    var reducedMotion by mutableStateOf(false)
+        private set
+
+    /** List density: comfortable (default) or compact. */
+    var density by mutableStateOf(COMFORTABLE)
         private set
 
     private var prefs: SharedPreferences? = null
@@ -56,6 +70,9 @@ object AppTheme {
         mode = p.getString("themeMode", SYSTEM).orEmpty().ifBlank { SYSTEM }
             .takeIf { it == SYSTEM || it == LIGHT || it == DARK } ?: SYSTEM
         accentColor = normalizeColor(p.getString("accentColor", DEFAULT_ACCENT).orEmpty()).let { if (it == "#1B6B45") DEFAULT_ACCENT else it }
+        dynamicColor = p.getBoolean("dynamicColor", false)
+        reducedMotion = p.getBoolean("reducedMotion", false)
+        density = p.getString("density", COMFORTABLE).orEmpty().takeIf { it == COMPACT } ?: COMFORTABLE
     }
 
     fun set(value: String) {
@@ -73,6 +90,21 @@ object AppTheme {
     fun setAccent(value: String) {
         accentColor = normalizeColor(value)
         prefs?.edit()?.putString("accentColor", accentColor)?.apply()
+    }
+
+    fun setDynamic(value: Boolean) {
+        dynamicColor = value
+        prefs?.edit()?.putBoolean("dynamicColor", value)?.apply()
+    }
+
+    fun setMotion(value: Boolean) {
+        reducedMotion = value
+        prefs?.edit()?.putBoolean("reducedMotion", value)?.apply()
+    }
+
+    fun setDensityMode(value: String) {
+        density = if (value == COMPACT) COMPACT else COMFORTABLE
+        prefs?.edit()?.putString("density", density)?.apply()
     }
 
     private fun normalizeColor(value: String): String {

@@ -15,6 +15,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -26,6 +27,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -45,15 +47,18 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -67,27 +72,35 @@ import androidx.compose.ui.composed
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.powerk.app.AppElevation
+import com.powerk.app.AppReducedMotion
+import com.powerk.app.AppSemantic
 import com.powerk.app.Link
 import java.time.Duration
 import java.time.Instant
@@ -118,9 +131,58 @@ fun ago(iso: String): String {
 fun Modifier.tap(enabled: Boolean = true, onLongClick: (() -> Unit)? = null, onClick: () -> Unit): Modifier = composed {
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (pressed) 0.96f else 1f, spring(dampingRatio = 0.6f, stiffness = 900f), label = "tap")
+    val reduced = AppReducedMotion
+    val scale by animateFloatAsState(if (pressed && !reduced) 0.96f else 1f, spring(dampingRatio = 0.6f, stiffness = 900f), label = "tap")
     graphicsLayer { scaleX = scale; scaleY = scale }
         .combinedClickable(interactionSource = source, indication = null, enabled = enabled, onLongClick = onLongClick, onClick = onClick)
+}
+
+/**
+ * Theme-tinted drop shadow: the single place that owns shadow colour and strength, so every
+ * lifted surface (cards, dock, rail, thumbs, FABs) shares one depth language. Use [AppElevation]
+ * levels for the height instead of ad-hoc numbers.
+ */
+@Composable
+fun Modifier.appShadow(shape: Shape, elevation: Dp): Modifier {
+    val scheme = MaterialTheme.colorScheme
+    val light = scheme.background.luminance() > 0.5f
+    // Light themes: a neutral-warm tint at partial strength reads softer than pure black.
+    // Dark themes: deeper black keeps lifted surfaces separated from the page.
+    val tint = if (light) scheme.onSurface.copy(alpha = 0.62f) else Color.Black.copy(alpha = 0.88f)
+    return shadow(elevation, shape, clip = false, ambientColor = tint, spotColor = tint)
+}
+
+/**
+ * Opaque fill for "selected" capsules (dock, rail, segmented tabs, mini outlet pills).
+ * Composited onto a container colour on purpose: a translucent capsule lets shadows and
+ * whatever sits behind it show through, which reads as a strange lighter blob inside the pill.
+ */
+@Composable
+fun capsuleFill(strong: Boolean = false): Color {
+    val scheme = MaterialTheme.colorScheme
+    val light = scheme.surface.luminance() > 0.5f
+    val base = if (light) scheme.surfaceContainer else scheme.surfaceContainerHigh
+    return scheme.primary.copy(alpha = if (strong) 0.24f else 0.17f).compositeOver(base)
+}
+
+/**
+ * Pull-to-refresh shell for pages whose data can be re-fetched manually. The page keeps its own
+ * scroll container; the indicator follows the nested scroll and only shows while [refreshing].
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun Refreshable(
+    refreshing: Boolean,
+    onRefresh: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    PullToRefreshBox(
+        isRefreshing = refreshing,
+        onRefresh = onRefresh,
+        modifier = modifier,
+        content = content,
+    )
 }
 
 @Composable
@@ -133,7 +195,9 @@ fun VCard(
     val scheme = MaterialTheme.colorScheme
     val shape = MaterialTheme.shapes.large
     Surface(
-        modifier = modifier.fillMaxWidth().then(if (onClick != null) Modifier.tap(onClick = onClick) else Modifier),
+        modifier = modifier.fillMaxWidth()
+            .appShadow(shape, AppElevation.card)
+            .then(if (onClick != null) Modifier.tap(onClick = onClick) else Modifier),
         shape = shape,
         color = Color.Transparent,
         border = BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.9f)),
@@ -141,9 +205,9 @@ fun VCard(
         Column(
             Modifier
                 .background(
-                    Brush.verticalGradient(
-                        listOf(scheme.surface.copy(alpha = 0.94f), scheme.surfaceContainerLow.copy(alpha = 0.86f)),
-                    ),
+                    // Fully opaque: a translucent card lets whatever sits behind it ghost through
+                    // (e.g. the swipe-to-delete layer in Activity showed under the alert text).
+                    Brush.verticalGradient(listOf(scheme.surface, scheme.surfaceContainerLow)),
                 )
                 .drawBehind {
                     // Diagonal specular sheen: light grazing across the glass pane.
@@ -175,9 +239,10 @@ enum class Tone { GOOD, WARN, BAD, NEUTRAL }
 @Composable
 fun Pill(text: String, tone: Tone = Tone.NEUTRAL, modifier: Modifier = Modifier, outlined: Boolean = false) {
     val scheme = MaterialTheme.colorScheme
+    val semantic = AppSemantic
     val (bg, fg) = when (tone) {
-        Tone.GOOD -> scheme.primaryContainer to scheme.primary
-        Tone.WARN -> scheme.tertiaryContainer to scheme.tertiary
+        Tone.GOOD -> semantic.successContainer to semantic.onSuccessContainer
+        Tone.WARN -> semantic.warningContainer to semantic.onWarningContainer
         Tone.BAD -> scheme.errorContainer to scheme.error
         Tone.NEUTRAL -> scheme.surfaceContainerHigh to scheme.onSurfaceVariant
     }
@@ -205,36 +270,41 @@ fun MetricPill(value: String) = Pill(value, Tone.NEUTRAL)
 
 @Composable
 fun StatusDot(online: Boolean) {
+    val scheme = MaterialTheme.colorScheme
+    val semantic = AppSemantic
     Box(
         Modifier
             .size(9.dp)
-            .background(if (online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error, CircleShape)
+            .background(if (online) semantic.success else scheme.error, CircleShape)
     )
 }
 
 @Composable
 fun LiveBadge(link: Link) {
-    val pulse = rememberInfiniteTransition(label = "live")
-    val alpha by pulse.animateFloat(
-        initialValue = 1f,
-        targetValue = 0.25f,
-        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
-        label = "alpha",
-    )
-    val scheme = MaterialTheme.colorScheme
-    val (tone, label, color) = when (link) {
-        Link.LIVE -> Triple(Tone.GOOD, "LIVE", scheme.primary)
-        Link.CONNECTING -> Triple(Tone.WARN, "CONNECTING", scheme.tertiary)
-        Link.OFFLINE -> Triple(Tone.BAD, "OFFLINE", scheme.error)
+    val reduced = AppReducedMotion
+    // The pulse is decorative: skipped entirely when motion is reduced.
+    val alpha = if (link == Link.LIVE && !reduced) {
+        val pulse = rememberInfiniteTransition(label = "live")
+        val a by pulse.animateFloat(
+            initialValue = 1f,
+            targetValue = 0.25f,
+            animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
+            label = "alpha",
+        )
+        a
+    } else {
+        1f
     }
-    val bg = when (tone) {
-        Tone.GOOD -> scheme.primaryContainer
-        Tone.WARN -> scheme.tertiaryContainer
-        else -> scheme.errorContainer
+    val scheme = MaterialTheme.colorScheme
+    val semantic = AppSemantic
+    val (label, color, bg) = when (link) {
+        Link.LIVE -> Triple("LIVE", semantic.success, semantic.successContainer)
+        Link.CONNECTING -> Triple("CONNECTING", semantic.warning, semantic.warningContainer)
+        Link.OFFLINE -> Triple("OFFLINE", scheme.error, scheme.errorContainer)
     }
     Surface(shape = CircleShape, color = bg) {
         Row(Modifier.padding(horizontal = 9.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(6.dp).alpha(if (link == Link.LIVE) alpha else 1f).background(color, CircleShape))
+            Box(Modifier.size(6.dp).alpha(alpha).background(color, CircleShape))
             Spacer(Modifier.width(5.dp))
             Text(label, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = color, maxLines = 1, softWrap = false)
         }
@@ -329,24 +399,26 @@ fun SegTabs(options: List<String>, selected: Int, onSelect: (Int) -> Unit, modif
         modifier = modifier.fillMaxWidth(),
     ) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val reduced = AppReducedMotion
             val segW = (maxWidth - inset * 2 - gap * (options.size - 1).coerceAtLeast(0)) / options.size
             val thumbX by animateDpAsState(
                 inset + (segW + gap) * selected,
-                spring(dampingRatio = 0.8f, stiffness = 360f),
+                if (reduced) snap() else spring(dampingRatio = 0.8f, stiffness = 360f),
                 label = "segThumbX",
             )
             Box(Modifier.fillMaxWidth()) {
-                // Sliding frosted thumb.
+                // Sliding thumb — opaque fill so no shadow or content shows through as a blob.
                 Box(
                     Modifier
                         .offset(x = thumbX)
                         .padding(vertical = inset)
                         .width(segW)
                         .height(34.dp)
+                        .shadow(3.dp, thumbShape, clip = false)
                         .clip(thumbShape)
                         .background(
                             Brush.verticalGradient(
-                                listOf(scheme.primary.copy(alpha = 0.34f), scheme.primary.copy(alpha = 0.16f)),
+                                listOf(capsuleFill(strong = true), capsuleFill()),
                             ),
                         )
                         .border(1.dp, scheme.primary.copy(alpha = 0.35f), thumbShape),
@@ -375,12 +447,19 @@ fun SegTabs(options: List<String>, selected: Int, onSelect: (Int) -> Unit, modif
 @Composable
 fun Shimmer(modifier: Modifier) {
     val scheme = MaterialTheme.colorScheme
-    val t = rememberInfiniteTransition(label = "shimmer")
-    val x by t.animateFloat(0f, 1400f, infiniteRepeatable(tween(1400, easing = LinearEasing)), label = "x")
+    val reduced = AppReducedMotion
+    val x = if (reduced) {
+        0f
+    } else {
+        val t = rememberInfiniteTransition(label = "shimmer")
+        val v by t.animateFloat(0f, 1400f, infiniteRepeatable(tween(1400, easing = LinearEasing)), label = "x")
+        v
+    }
     Box(
         modifier.clip(MaterialTheme.shapes.large)
             .background(scheme.surfaceContainerHigh)
             .drawBehind {
+                if (reduced) return@drawBehind
                 drawRect(
                     Brush.linearGradient(
                         colors = listOf(Color.Transparent, scheme.onSurface.copy(alpha = 0.07f), Color.Transparent),
@@ -395,12 +474,13 @@ fun Shimmer(modifier: Modifier) {
 @Composable
 fun ConfirmDialog(title: String, text: String, confirm: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
     Dialog(onDismissRequest = onDismiss) {
+        val reduced = AppReducedMotion
         val shown = remember { MutableTransitionState(false) }
         LaunchedEffect(Unit) { shown.targetState = true }
         AnimatedVisibility(
             visibleState = shown,
-            enter = scaleIn(spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMediumLow), initialScale = 0.82f) + fadeIn(tween(140)),
-            exit = scaleOut(tween(130), targetScale = 0.9f) + fadeOut(tween(120)),
+            enter = if (reduced) fadeIn(tween(140)) else scaleIn(spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMediumLow), initialScale = 0.82f) + fadeIn(tween(140)),
+            exit = if (reduced) fadeOut(tween(120)) else scaleOut(tween(130), targetScale = 0.9f) + fadeOut(tween(120)),
         ) {
             val scheme = MaterialTheme.colorScheme
             Surface(
@@ -408,7 +488,7 @@ fun ConfirmDialog(title: String, text: String, confirm: String, onConfirm: () ->
                 color = scheme.surfaceContainerHigh,
                 contentColor = scheme.onSurface,
                 border = BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.9f)),
-                shadowElevation = 18.dp,
+                shadowElevation = AppElevation.overlay,
             ) {
                 Column(Modifier.padding(22.dp)) {
                     Text(title, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.3).sp)
@@ -437,6 +517,38 @@ fun rememberDismissKeyboard(): () -> Unit {
     return { keyboard?.hide(); focus.clearFocus() }
 }
 
+/** Rename a strip or outlet: live text field (Save lights up while typing), Cancel/Save. */
+@Composable
+fun RenameDialog(current: String, title: String = "Rename", onDismiss: () -> Unit, onSave: (String) -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    var name by remember { mutableStateOf(current) }
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = scheme.surfaceContainerHigh,
+            contentColor = scheme.onSurface,
+            border = BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.9f)),
+            shadowElevation = AppElevation.overlay,
+        ) {
+            Column(Modifier.padding(20.dp)) {
+                Text(title, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.3).sp)
+                Spacer(Modifier.height(12.dp))
+                VTextField(name, { name = it }, "Name")
+                Spacer(Modifier.height(16.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onDismiss) { Text("Cancel", color = scheme.onSurfaceVariant) }
+                    Spacer(Modifier.width(6.dp))
+                    Button(
+                        enabled = name.isNotBlank(),
+                        onClick = { onSave(name.trim()); onDismiss() },
+                        shape = RoundedCornerShape(14.dp),
+                    ) { Text("Save", fontWeight = FontWeight.SemiBold) }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun VTextField(
     value: String,
@@ -448,16 +560,24 @@ fun VTextField(
     singleLine: Boolean = true,
 ) {
     val scheme = MaterialTheme.colorScheme
-    var text by remember(value) { mutableStateOf(value) }
+    var tfv by remember { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }
+    var focused by remember { mutableStateOf(false) }
+    // The caller can reset the value (another outlet, server refresh) — mirror it locally.
+    LaunchedEffect(value) { if (value != tfv.text) tfv = TextFieldValue(value, TextRange(value.length)) }
     val dismiss = rememberDismissKeyboard()
-    fun commit() { if (text != value && text.isNotBlank()) onChange(text.trim()) else text = value }
+    // Every keystroke propagates live so Save buttons enable and searches filter while typing;
+    // done/blur only normalises the value (trims).
+    fun commit() {
+        val trimmed = tfv.text.trim()
+        if (trimmed != tfv.text) { tfv = tfv.copy(text = trimmed, selection = TextRange(trimmed.length)); onChange(trimmed) }
+    }
     // Numeric/suffixed fields stay compact; text fields fill the available width.
     val compact = numeric || suffix != null
     Surface(modifier = if (compact) modifier else modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp), color = scheme.surfaceContainer, border = BorderStroke(1.dp, scheme.outlineVariant)) {
         Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             BasicTextField(
-                value = text,
-                onValueChange = { text = it },
+                value = tfv,
+                onValueChange = { tfv = it; onChange(it.text) },
                 singleLine = singleLine,
                 textStyle = TextStyle(fontSize = 13.sp, fontFamily = Mono, color = scheme.onSurface, textAlign = if (compact) TextAlign.End else TextAlign.Start),
                 cursorBrush = SolidColor(scheme.primary),
@@ -467,9 +587,15 @@ fun VTextField(
                 ),
                 keyboardActions = KeyboardActions(onDone = { commit(); dismiss() }),
                 decorationBox = { inner ->
-                    Box { if (text.isEmpty()) Text(label, fontSize = 13.sp, color = scheme.onSurfaceVariant); inner() }
+                    Box { if (tfv.text.isEmpty()) Text(label, fontSize = 13.sp, color = scheme.onSurfaceVariant); inner() }
                 },
-                modifier = (if (compact) Modifier.width(80.dp) else Modifier.weight(1f)).onFocusChanged { if (!it.isFocused) commit() },
+                modifier = (if (compact) Modifier.width(80.dp) else Modifier.weight(1f)).onFocusChanged { st ->
+                    // Focusing selects the whole value, so editing a name never starts with
+                    // a manual select-all. Blur commits (trims).
+                    if (st.isFocused && !focused) tfv = tfv.copy(selection = TextRange(0, tfv.text.length))
+                    focused = st.isFocused
+                    if (!st.isFocused) commit()
+                },
             )
             if (suffix != null) Text(" $suffix", fontSize = 11.sp, color = scheme.onSurfaceVariant)
         }
@@ -491,9 +617,16 @@ fun rssiLevel(rssi: Int?): Int = when {
 
 @Composable
 fun WifiBars(rssi: Int?, modifier: Modifier = Modifier, active: Boolean = true) {
+    val scheme = MaterialTheme.colorScheme
+    // Online but the strip hasn't reported signal strength yet (fresh MTTL sessions start with
+    // rssi unset): show a connected glyph instead of four dead bars that read as "no Wi-Fi".
+    if (active && rssi == null) {
+        Icon(Icons.Rounded.Wifi, "Connected", modifier.size(13.dp), tint = scheme.primary)
+        return
+    }
     val level = if (active) rssiLevel(rssi) else 0
-    val on = MaterialTheme.colorScheme.primary
-    val off = MaterialTheme.colorScheme.outlineVariant
+    val on = scheme.primary
+    val off = scheme.outlineVariant
     Row(modifier.height(12.dp), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.Bottom) {
         for (i in 1..4) Box(Modifier.width(3.dp).height((3 + i * 2.25f).dp).clip(RoundedCornerShape(1.dp)).background(if (i <= level) on else off))
     }

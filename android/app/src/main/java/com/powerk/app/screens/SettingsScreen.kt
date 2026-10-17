@@ -1,5 +1,6 @@
 package com.powerk.app.screens
 
+import android.os.Build
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -75,7 +76,9 @@ import androidx.compose.ui.unit.sp
 import android.content.Context
 import android.content.SharedPreferences
 import com.powerk.app.Api
+import com.powerk.app.AppElevation
 import com.powerk.app.AppSettings
+import com.powerk.app.AppSpacing
 import com.powerk.app.AppTheme
 import com.powerk.app.Lang
 import com.powerk.app.Link
@@ -107,6 +110,7 @@ private fun Group(title: String, content: @Composable () -> Unit) {
             shape = MaterialTheme.shapes.large,
             color = MaterialTheme.colorScheme.surface,
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            shadowElevation = AppElevation.card,
             modifier = Modifier.fillMaxWidth(),
         ) { Column { content() } }
     }
@@ -181,15 +185,22 @@ fun SettingsScreen(vm: StripsViewModel, onNavigate: (String) -> Unit) {
 
     fun update(next: (AppSettings) -> AppSettings) { settings?.let { vm.saveSettings(next(it)) } }
 
+    val spacing = AppSpacing
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).imePadding().navigationBarsPadding().padding(bottom = 16.dp)) {
         ScreenHeader(stringResource(R.string.settings_title), eyebrow = "Preferences")
-        Column(Modifier.padding(horizontal = 14.dp).padding(bottom = 104.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Group(stringResource(R.string.theme_title)) {
+        Column(Modifier.padding(horizontal = spacing.screenPad).padding(bottom = 104.dp), verticalArrangement = Arrangement.spacedBy(spacing.sectionGap)) {
+            Group("Appearance") {
                 Row2(stringResource(R.string.theme_title)) {
                     MiniSeg(
                         listOf(AppTheme.SYSTEM to stringResource(R.string.theme_system), AppTheme.LIGHT to stringResource(R.string.theme_light), AppTheme.DARK to stringResource(R.string.theme_dark)),
                         AppTheme.mode,
                     ) { v -> v?.let { AppTheme.set(it); update { s -> s.copy(theme = it) } } }
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    Divider()
+                    Row2("Dynamic color", "Follow the wallpaper palette") {
+                        Switch(AppTheme.dynamicColor, { AppTheme.setDynamic(it) })
+                    }
                 }
                 Divider()
                 Row2(stringResource(R.string.language_title)) {
@@ -203,14 +214,14 @@ fun SettingsScreen(vm: StripsViewModel, onNavigate: (String) -> Unit) {
                     MiniSeg(listOf("24h" to "24h", "12h" to "12h"), settings?.timeFormat) { v -> v?.let { update { s -> s.copy(timeFormat = it) } } }
                 }
                 Divider()
-                Row2(stringResource(R.string.theme_accent), "Synced with the web app") {
+                Row2(stringResource(R.string.theme_accent), if (AppTheme.dynamicColor) "Picking a color turns off dynamic color" else "Synced with the web app") {
                     Row(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically) {
                         ACCENTS.forEach { c ->
-                            val on = AppTheme.accentColor.equals(c, true)
+                            val on = AppTheme.accentColor.equals(c, true) && !AppTheme.dynamicColor
                             val color = Color(0xFF000000 or c.removePrefix("#").toLong(16))
                             Box(
                                 Modifier.size(22.dp).background(color, CircleShape).then(if (on) Modifier.border(2.dp, scheme.onSurface, CircleShape) else Modifier)
-                                    .tap { AppTheme.setAccent(c); update { s -> s.copy(accentColor = c) } },
+                                    .tap { AppTheme.setDynamic(false); AppTheme.setAccent(c); update { s -> s.copy(accentColor = c) } },
                                 contentAlignment = Alignment.Center,
                             ) { if (on) Icon(Icons.Rounded.Check, null, Modifier.size(13.dp), tint = Color.White) }
                         }
@@ -232,9 +243,17 @@ fun SettingsScreen(vm: StripsViewModel, onNavigate: (String) -> Unit) {
                         ColorPickerDialog(
                             initialHex = AppTheme.accentColor,
                             onDismiss = { showPicker = false },
-                            onPick = { hex -> AppTheme.setAccent(hex); update { s -> s.copy(accentColor = hex) }; showPicker = false },
+                            onPick = { hex -> AppTheme.setDynamic(false); AppTheme.setAccent(hex); update { s -> s.copy(accentColor = hex) }; showPicker = false },
                         )
                     }
+                }
+                Divider()
+                Row2("Density", "Compact shows more rows on screen") {
+                    MiniSeg(listOf(AppTheme.COMFORTABLE to "Comfortable", AppTheme.COMPACT to "Compact"), AppTheme.density) { v -> v?.let { AppTheme.setDensityMode(it) } }
+                }
+                Divider()
+                Row2("Reduce motion", "Trim decorative animation; also follows the system setting") {
+                    Switch(AppTheme.reducedMotion, { AppTheme.setMotion(it) })
                 }
             }
 

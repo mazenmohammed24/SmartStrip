@@ -35,6 +35,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -46,6 +47,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.powerk.app.AppSpacing
 import com.powerk.app.EnergyReport
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -58,6 +60,7 @@ import com.powerk.app.components.EmptyState
 import com.powerk.app.components.Mono
 import com.powerk.app.components.Pill
 import com.powerk.app.components.Privacy
+import com.powerk.app.components.Refreshable
 import com.powerk.app.components.iconGlyph
 
 import com.powerk.app.components.ScreenHeader
@@ -72,6 +75,7 @@ import com.powerk.app.components.tap
 import com.powerk.app.components.fmtKwh
 import com.powerk.app.components.fmtNum
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.min
 
@@ -86,6 +90,17 @@ fun EnergyScreen(vm: StripsViewModel, initialStrip: String?, onBack: (() -> Unit
     val days = RANGES[rangeIndex]
     var tariff by remember { mutableStateOf(false) }
     var resetting by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    var refreshing by remember { mutableStateOf(false) }
+
+    // Pull-to-refresh: reload the report for the strip and range currently on screen.
+    fun refreshEnergy() {
+        val m = mac ?: return
+        scope.launch {
+            refreshing = true
+            try { vm.loadEnergy(m, days).join() } finally { refreshing = false }
+        }
+    }
 
     LaunchedEffect(mac, days) {
         if (mac == null) return@LaunchedEffect
@@ -96,106 +111,108 @@ fun EnergyScreen(vm: StripsViewModel, initialStrip: String?, onBack: (() -> Unit
     }
     val report = mac?.let { vm.energy["$days:$it"] }
 
-    LazyColumn(
-        Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 104.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        item(key = "header") { ScreenHeader(strips.firstOrNull { it.mac == mac }?.let { Privacy.name(it) } ?: "Consumption", onBack = onBack, eyebrow = "Energy") }
-        if (mac == null) {
-            item { EmptyState("No strips", "Add a strip to see its consumption.") }
-            return@LazyColumn
+    Refreshable(refreshing, { refreshEnergy() }, Modifier.fillMaxSize()) {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 104.dp),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.listGap),
+        ) {
+            item(key = "header") { ScreenHeader(strips.firstOrNull { it.mac == mac }?.let { Privacy.name(it) } ?: "Consumption", onBack = onBack, eyebrow = "Energy") }
+            if (mac == null) {
+                item { EmptyState("No strips", "Add a strip to see its consumption.") }
+                return@LazyColumn
+            }
+            if (strips.size > 1) {
+                item(key = "strips") {
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        strips.forEach { s -> FilterChip(selected = s.mac == mac, onClick = { picked = s.mac }, label = { Text(Privacy.name(s), maxLines = 1) }) }
+                    }
+                }
+            }
+            item(key = "range") { SegTabs(listOf("7 days", "30 days", "90 days"), rangeIndex, { rangeIndex = it }) }
+            if (report == null) {
+                item(key = "sk1") { Shimmer(Modifier.fillMaxWidth().height(130.dp)) }
+                item(key = "sk2") { Shimmer(Modifier.fillMaxWidth().height(200.dp)) }
+            } else {
+                item(key = "total") { TotalCard(report, onTariff = { tariff = true }) }
+                item(key = "chart") {
+                    var sel by remember(report) { mutableStateOf(report.daily.lastIndex) }
+                    val dim = MaterialTheme.colorScheme.onSurfaceVariant
+                    VCard(padding = 18.dp) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Daily usage", Modifier.weight(1f), fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                            Text("kWh / day", fontSize = 14.sp, color = dim)
+                        }
+                        report.daily.getOrNull(sel)?.let {
+                            Spacer(Modifier.height(6.dp))
+                            Row {
+                                Text(it.date.takeLast(5), fontFamily = Mono, fontSize = 15.sp, color = dim)
+                                Text("  —  ", fontFamily = Mono, fontSize = 15.sp, color = dim)
+                                Text("${fmtKwh(it.kwh)} kWh", fontFamily = Mono, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        BarChart(report.daily.map { it.kwh }, sel, { sel = it })
+                        if (report.daily.isNotEmpty()) {
+                            Spacer(Modifier.height(8.dp))
+                            val labelEvery = if (report.daily.size <= 8) 1 else report.daily.size / 6
+                            Row(Modifier.fillMaxWidth()) {
+                                report.daily.forEachIndexed { i, d ->
+                                    Text(
+                                        if (i % labelEvery == 0 || i == report.daily.lastIndex && report.daily.size <= 8) d.date.takeLast(5) else "",
+                                        Modifier.weight(1f), fontFamily = Mono, fontSize = 10.sp, maxLines = 1, softWrap = false, textAlign = TextAlign.Center,
+                                        color = if (i == sel) MaterialTheme.colorScheme.primary else dim,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                item(key = "outlets") {
+                    val dim = MaterialTheme.colorScheme.onSurfaceVariant
+                    VCard(padding = 18.dp) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("By outlet", Modifier.weight(1f), fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                            Text("last $days days", fontSize = 14.sp, color = dim)
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        val max = (report.outlets.maxOfOrNull { it.kwh } ?: 0.0).coerceAtLeast(0.0001)
+                        val sum = report.outlets.sumOf { it.kwh }.coerceAtLeast(0.0001)
+                        report.outlets.forEachIndexed { i, o ->
+                            if (i > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.outlineVariant))
+                            Row(Modifier.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                val live = strips.firstOrNull { it.mac == mac }?.outlets?.firstOrNull { it.n == o.relayIndex + 1 }
+                                val glyph = live?.icon?.takeIf { it.isNotBlank() && it != "plug" }
+                                if (glyph == null) SocketFace(true, 38.dp) else Box(Modifier.size(38.dp), contentAlignment = Alignment.Center) { Text(iconGlyph(glyph), fontSize = 26.sp) }
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(live?.name?.ifBlank { null } ?: o.name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                    Spacer(Modifier.height(6.dp))
+                                    Box(
+                                        Modifier.fillMaxWidth((o.kwh / max).toFloat().coerceIn(0.015f, 1f)).height(6.dp)
+                                            .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(3.dp)),
+                                    )
+                                }
+                                Spacer(Modifier.width(10.dp))
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text("${fmtKwh(o.kwh)} kWh", fontFamily = Mono, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+                                    Text("${fmtNum(o.kwh / sum * 100, 0)}%", fontFamily = Mono, fontSize = 12.sp, color = dim)
+                                }
+                            }
+                        }
+                        if (report.outlets.isEmpty()) Text("No data yet", color = dim)
+                    }
+                }
+                item(key = "reset") {
+                    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.Center) {
+                        Text(
+                            "↻  Reset consumption",
+                            Modifier.tap { resetting = true }.padding(12.dp),
+                            fontSize = 17.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }        }
         }
-        if (strips.size > 1) {
-            item(key = "strips") {
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    strips.forEach { s -> FilterChip(selected = s.mac == mac, onClick = { picked = s.mac }, label = { Text(Privacy.name(s), maxLines = 1) }) }
-                }
-            }
-        }
-        item(key = "range") { SegTabs(listOf("7 days", "30 days", "90 days"), rangeIndex, { rangeIndex = it }) }
-        if (report == null) {
-            item(key = "sk1") { Shimmer(Modifier.fillMaxWidth().height(130.dp)) }
-            item(key = "sk2") { Shimmer(Modifier.fillMaxWidth().height(200.dp)) }
-        } else {
-            item(key = "total") { TotalCard(report, onTariff = { tariff = true }) }
-            item(key = "chart") {
-                var sel by remember(report) { mutableStateOf(report.daily.lastIndex) }
-                val dim = MaterialTheme.colorScheme.onSurfaceVariant
-                VCard(padding = 18.dp) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Daily usage", Modifier.weight(1f), fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                        Text("kWh / day", fontSize = 14.sp, color = dim)
-                    }
-                    report.daily.getOrNull(sel)?.let {
-                        Spacer(Modifier.height(6.dp))
-                        Row {
-                            Text(it.date.takeLast(5), fontFamily = Mono, fontSize = 15.sp, color = dim)
-                            Text("  —  ", fontFamily = Mono, fontSize = 15.sp, color = dim)
-                            Text("${fmtKwh(it.kwh)} kWh", fontFamily = Mono, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                        }
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    BarChart(report.daily.map { it.kwh }, sel, { sel = it })
-                    if (report.daily.isNotEmpty()) {
-                        Spacer(Modifier.height(8.dp))
-                        val labelEvery = if (report.daily.size <= 8) 1 else report.daily.size / 6
-                        Row(Modifier.fillMaxWidth()) {
-                            report.daily.forEachIndexed { i, d ->
-                                Text(
-                                    if (i % labelEvery == 0 || i == report.daily.lastIndex && report.daily.size <= 8) d.date.takeLast(5) else "",
-                                    Modifier.weight(1f), fontFamily = Mono, fontSize = 10.sp, maxLines = 1, softWrap = false, textAlign = TextAlign.Center,
-                                    color = if (i == sel) MaterialTheme.colorScheme.primary else dim,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-            item(key = "outlets") {
-                val dim = MaterialTheme.colorScheme.onSurfaceVariant
-                VCard(padding = 18.dp) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("By outlet", Modifier.weight(1f), fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                        Text("last $days days", fontSize = 14.sp, color = dim)
-                    }
-                    Spacer(Modifier.height(10.dp))
-                    val max = (report.outlets.maxOfOrNull { it.kwh } ?: 0.0).coerceAtLeast(0.0001)
-                    val sum = report.outlets.sumOf { it.kwh }.coerceAtLeast(0.0001)
-                    report.outlets.forEachIndexed { i, o ->
-                        if (i > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.outlineVariant))
-                        Row(Modifier.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            val live = strips.firstOrNull { it.mac == mac }?.outlets?.firstOrNull { it.n == o.relayIndex + 1 }
-                            val glyph = live?.icon?.takeIf { it.isNotBlank() && it != "plug" }
-                            if (glyph == null) SocketFace(true, 38.dp) else Box(Modifier.size(38.dp), contentAlignment = Alignment.Center) { Text(iconGlyph(glyph), fontSize = 26.sp) }
-                            Spacer(Modifier.width(12.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(live?.name?.ifBlank { null } ?: o.name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                                Spacer(Modifier.height(6.dp))
-                                Box(
-                                    Modifier.fillMaxWidth((o.kwh / max).toFloat().coerceIn(0.015f, 1f)).height(6.dp)
-                                        .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(3.dp)),
-                                )
-                            }
-                            Spacer(Modifier.width(10.dp))
-                            Column(horizontalAlignment = Alignment.End) {
-                                Text("${fmtKwh(o.kwh)} kWh", fontFamily = Mono, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
-                                Text("${fmtNum(o.kwh / sum * 100, 0)}%", fontFamily = Mono, fontSize = 12.sp, color = dim)
-                            }
-                        }
-                    }
-                    if (report.outlets.isEmpty()) Text("No data yet", color = dim)
-                }
-            }
-            item(key = "reset") {
-                Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.Center) {
-                    Text(
-                        "↻  Reset consumption",
-                        Modifier.tap { resetting = true }.padding(12.dp),
-                        fontSize = 17.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }        }
     }
 
     if (tariff && report != null) TariffDialog(vm, report.tariff, report.currency) { tariff = false }

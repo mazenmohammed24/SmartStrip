@@ -77,6 +77,8 @@ import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.toArgb
+import com.powerk.app.AppElevation
+import com.powerk.app.AppReducedMotion
 import com.powerk.app.Outlet
 import com.powerk.app.Strip
 import com.powerk.app.StripsViewModel
@@ -103,6 +105,7 @@ fun TilesStripCard(strip: Strip, vm: StripsViewModel, onOpen: () -> Unit, modifi
     val scheme = MaterialTheme.colorScheme
     var outletSheet by remember { mutableStateOf<Int?>(null) }
     var stripSheet by remember { mutableStateOf(false) }
+    var renaming by remember { mutableStateOf(false) }
     val anyOn = strip.outlets.any { it.on }
 
     Surface(
@@ -110,13 +113,14 @@ fun TilesStripCard(strip: Strip, vm: StripsViewModel, onOpen: () -> Unit, modifi
         shape = RoundedCornerShape(26.dp),
         color = scheme.surface,
         border = BorderStroke(1.dp, scheme.outlineVariant),
+        shadowElevation = AppElevation.card,
     ) {
         Column(Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(8.dp).background(if (strip.online) scheme.primary else scheme.error, CircleShape))
                 Spacer(Modifier.width(8.dp))
                 Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                    Text(Privacy.name(strip), Modifier.weight(1f, fill = false).tap(onClick = onOpen), fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(Privacy.name(strip), Modifier.weight(1f, fill = false).tap(onClick = onOpen, onLongClick = { renaming = true }), fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Spacer(Modifier.width(6.dp))
                     NameEye(strip, 16.dp)
                 }
@@ -156,6 +160,7 @@ fun TilesStripCard(strip: Strip, vm: StripsViewModel, onOpen: () -> Unit, modifi
     }
     outletSheet?.let { n -> OutletSheet(strip.mac, n, vm) { outletSheet = null } }
     if (stripSheet) StripSheet(strip.mac, vm, { stripSheet = false }, onOpen)
+    if (renaming) RenameDialog(strip.name, "Rename strip", { renaming = false }) { vm.renameStrip(strip.mac, it) }
 }
 
 @Composable
@@ -169,7 +174,8 @@ private fun OutletTile(strip: Strip, o: Outlet, vm: StripsViewModel, left: Boole
     val align = if (left) Alignment.Start else Alignment.End
     val textAlign = if (left) TextAlign.Start else TextAlign.End
     val pop = rememberPop(o.on)
-    val orbit by animateFloatAsState(if (o.on) 1f else 0f, tween(380), label = "tileOrbit")
+    val reduced = AppReducedMotion
+    val orbit by animateFloatAsState(if (o.on && !reduced) 1f else 0f, tween(380), label = "tileOrbit")
     // The master button's notch eats the inner bottom corner of the top tiles, so keep the text clear of it.
     val inset = if (notch && top) 26.dp else 0.dp
 
@@ -223,11 +229,13 @@ private val Color0 = Color.Transparent
 /** Springy squash-and-release that plays whenever [on] flips (not on first composition). */
 @Composable
 private fun rememberPop(on: Boolean): Animatable<Float, AnimationVector1D> {
+    val reduced = AppReducedMotion
     val pop = remember { Animatable(1f) }
     var seen by remember { mutableStateOf(on) }
     LaunchedEffect(on) {
         if (on != seen) {
             seen = on
+            if (reduced) return@LaunchedEffect
             pop.snapTo(0.93f)
             pop.animateTo(1f, spring(0.38f, 380f))
         }

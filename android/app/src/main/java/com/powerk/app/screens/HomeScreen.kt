@@ -111,6 +111,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.ui.unit.sp
+import com.powerk.app.AppSpacing
 import com.powerk.app.Link
 import com.powerk.app.Server
 import com.powerk.app.Strip
@@ -120,6 +121,7 @@ import com.powerk.app.components.IconBox
 import com.powerk.app.components.LiveBadge
 import com.powerk.app.components.MessageCard
 import com.powerk.app.components.Mono
+import com.powerk.app.components.Refreshable
 import com.powerk.app.components.ScreenHeader
 import com.powerk.app.components.Shimmer
 import com.powerk.app.components.StripCard
@@ -165,49 +167,51 @@ fun HomeScreen(
             }
             val state = rememberLazyListState()
             LaunchedEffect(state.isScrollInProgress) { if (state.isScrollInProgress) dismiss() }
-            LazyColumn(
-                state = state,
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                contentPadding = PaddingValues(start = 14.dp, end = 14.dp, bottom = 100.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                item(key = "total") { TotalCard(vm, strips, vm.link) }
-                item(key = "links") {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        QuickLink(Icons.Rounded.BarChart, "Usage", Modifier.weight(1f)) { onTab("energy") }
-                        QuickLink(Icons.Rounded.AccessTime, "Timers", Modifier.weight(1f)) { onTab("automations") }
-                        QuickLink(Icons.Rounded.AutoMode, "Rules", Modifier.weight(1f)) { onTab("rules") }
-                        QuickLink(Icons.Rounded.MeetingRoom, "Rooms", Modifier.weight(1f)) { onTab("rooms") }
-                    }
-                }
-                if (strips.size > 1 || query.isNotEmpty()) {
-                    item(key = "search") {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            SearchField(query, { query = it }, dismiss, Modifier.weight(1f))
+            Refreshable(vm.refreshing, { vm.refresh() }, Modifier.weight(1f).fillMaxWidth()) {
+                LazyColumn(
+                    state = state,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 14.dp, end = 14.dp, bottom = 100.dp),
+                    verticalArrangement = Arrangement.spacedBy(AppSpacing.listGap),
+                ) {
+                    item(key = "total") { TotalCard(vm, strips, vm.link) }
+                    item(key = "links") {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            QuickLink(Icons.Rounded.BarChart, "Usage", Modifier.weight(1f)) { onTab("energy") }
+                            QuickLink(Icons.Rounded.AccessTime, "Timers", Modifier.weight(1f)) { onTab("automations") }
+                            QuickLink(Icons.Rounded.AutoMode, "Rules", Modifier.weight(1f)) { onTab("rules") }
+                            QuickLink(Icons.Rounded.MeetingRoom, "Rooms", Modifier.weight(1f)) { onTab("rooms") }
                         }
                     }
-                }
-                item(key = "layouttoggle") {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        SectionLabel(if (strips.isEmpty()) "Strips" else "Strips · ${strips.size}", Modifier.weight(1f))
-                        LayoutToggle(layout) { layout = it; prefs.edit().putInt("home_layout", it).apply() }
+                    if (strips.size > 1 || query.isNotEmpty()) {
+                        item(key = "search") {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                SearchField(query, { query = it }, dismiss, Modifier.weight(1f))
+                            }
+                        }
                     }
-                }
+                    item(key = "layouttoggle") {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            SectionLabel(if (strips.isEmpty()) "Strips" else "Strips · ${strips.size}", Modifier.weight(1f))
+                            LayoutToggle(layout) { layout = it; prefs.edit().putInt("home_layout", it).apply() }
+                        }
+                    }
 
-                stripBody(vm, strips, visible, query, { showAdd = true }) { strip ->
-                    Box(Modifier.animateItem()) {
-                        AnimatedContent(
-                            targetState = layout,
-                            transitionSpec = {
-                                (fadeIn(tween(260, delayMillis = 60)) + scaleIn(tween(300, easing = FastOutSlowInEasing), initialScale = 0.94f))
-                                    .togetherWith(fadeOut(tween(140)) + scaleOut(tween(220), targetScale = 0.96f))
-                            },
-                            label = "stripLayout",
-                        ) { mode ->
-                            when (mode) {
-                                LAYOUT_TILES -> TilesStripCard(strip, vm, { onOpenStrip(strip.mac) })
-                                LAYOUT_CARDS -> StripCard(strip, vm, { onOpenStrip(strip.mac) })
-                                else -> StripRow(strip, vm, { onOpenStrip(strip.mac) })
+                    stripBody(vm, strips, visible, query, { showAdd = true }) { strip ->
+                        Box(Modifier.animateItem()) {
+                            AnimatedContent(
+                                targetState = layout,
+                                transitionSpec = {
+                                    (fadeIn(tween(260, delayMillis = 60)) + scaleIn(tween(300, easing = FastOutSlowInEasing), initialScale = 0.94f))
+                                        .togetherWith(fadeOut(tween(140)) + scaleOut(tween(220), targetScale = 0.96f))
+                                },
+                                label = "stripLayout",
+                            ) { mode ->
+                                when (mode) {
+                                    LAYOUT_TILES -> TilesStripCard(strip, vm, { onOpenStrip(strip.mac) })
+                                    LAYOUT_CARDS -> StripCard(strip, vm, { onOpenStrip(strip.mac) })
+                                    else -> StripRow(strip, vm, { onOpenStrip(strip.mac) })
+                                }
                             }
                         }
                     }
@@ -253,7 +257,7 @@ private fun LayoutToggle(layout: Int, onChange: (Int) -> Unit) {
     val x by animateDpAsState(slot * layout, spring(0.7f, 700f), label = "toggleX")
     Surface(shape = CircleShape, color = scheme.surfaceContainerLow, border = BorderStroke(1.dp, scheme.outlineVariant)) {
         Box(Modifier.padding(2.dp)) {
-            Box(Modifier.offset(x = x).size(slot, 32.dp).background(scheme.primary, CircleShape))
+            Box(Modifier.offset(x = x).size(slot, 32.dp).shadow(3.dp, CircleShape).background(scheme.primary, CircleShape))
             Row {
                 listOf(
                     Triple(LAYOUT_ROWS, Icons.Rounded.ViewAgenda, "List layout"),

@@ -19,6 +19,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Holds the Wi-Fi provisioning wizard's state and runs the connect+send+wait flow in
@@ -42,11 +43,27 @@ class ProvisionViewModel(application: Application) : AndroidViewModel(applicatio
     var foundStripIp by mutableStateOf<String?>(null)
     var reconnecting by mutableStateOf(false)
 
+    /** True when Wi-Fi was sent but the strip has not shown up on the server yet (not an error). */
+    var provisionPending by mutableStateOf(false)
+
     /** False when location services are off, which makes Android report every Wi-Fi scan as empty. */
     var locationEnabled by mutableStateOf(true)
 
     private val ctx get() = getApplication<Application>()
     private var keepAliveJob: Job? = null
+
+    // Server-known strip ids captured while still on home Wi-Fi; a new id appearing after setup is
+    // the most reliable signal that the strip registered itself. Null = capture failed.
+    private var baselineStripIds: Set<String>? = null
+    private var baselineJob: Job? = null
+
+    private fun captureBaselineStripIds() {
+        baselineJob?.cancel()
+        baselineJob = viewModelScope.launch {
+            runCatching { Api.snapshot(Server.base, Server.token).map { it.mac }.toSet() }
+                .onSuccess { baselineStripIds = it }
+        }
+    }
 
     // Persists home Wi-Fi SSID/password across app restarts; cleared only by resetWizard().
     private val provisionPrefs get() = ctx.getSharedPreferences("powerk_provision", android.content.Context.MODE_PRIVATE)
@@ -83,6 +100,8 @@ class ProvisionViewModel(application: Application) : AndroidViewModel(applicatio
     fun advanceToStripSelection() {
         persistWifiCredentials()
         provisionStep = 1
+        // Snapshot the server's strip list early, while we still have route to the server.
+        captureBaselineStripIds()
         if (resolvedControllerIp == null) {
             viewModelScope.launch {
                 resolvedControllerIp = runCatching {
@@ -135,6 +154,7 @@ class ProvisionViewModel(application: Application) : AndroidViewModel(applicatio
         provisionStep = 0
         provisionStatus = null
         provisionOk = false
+        provisionPending = false
         provisionPassword = ""
         clearPersistedWifiCredentials()
         foundStripIp = null
@@ -164,6 +184,7 @@ class ProvisionViewModel(application: Application) : AndroidViewModel(applicatio
     private suspend fun sendWifiAndWait() {
         provisionBusy = true
         provisionStep = 2
+        provisionPending = false
         provisionStatus = ctx.getString(R.string.provision_sending)
         val standalone = selectedStrip?.type == StripApType.STANDALONE
         try {
@@ -197,9 +218,13 @@ class ProvisionViewModel(application: Application) : AndroidViewModel(applicatio
                     provisionOk = true
                 }
             } else {
-                val result = Api.waitForRegistration(Server.base, Server.token)
+                // The before-setup snapshot was taken on home Wi-Fi; it has almost always finished
+                // by now. Waiting a little longer lets us diff the strip list for self-registration.
+                withTimeoutOrNull(5_000L) { baselineJob?.join() }
+                val result = Api.waitForRegistration(Server.base, Server.token, baselineStripIds)
                 provisionStatus = result.message
                 provisionOk = result.registered
+                provisionPending = result.pending
             }
         } catch (e: Exception) {
             stopKeepAlive()
@@ -207,6 +232,7 @@ class ProvisionViewModel(application: Application) : AndroidViewModel(applicatio
             boundStripNetwork = null
             provisionStatus = e.message ?: "Provision failed"
             provisionOk = false
+            provisionPending = false
         }
         provisionBusy = false
         provisionStep = 3
@@ -220,13 +246,18 @@ class ProvisionViewModel(application: Application) : AndroidViewModel(applicatio
         WifiHelper.homeWifiValidationError(provisionSsid, provisionPassword)?.let { problem ->
             provisionStatus = problem
             provisionOk = false
+            provisionPending = false
             return
         }
         connectingAp = true
         connectAttempted = true
         reconnecting = false
         provisionOk = false
+        provisionPending = false
         provisionStatus = ctx.getString(R.string.provision_connecting_strip, strip.ssid)
+        // Refresh the before-setup snapshot (we're still on home Wi-Fi) so registration of this
+        // strip can be detected by diffing the server's strip list later.
+        captureBaselineStripIds()
 
         // Shared by the "already connected" fast path and the normal connect-request path below.
         val onLost: (Boolean) -> Unit = { fastRoamBack ->

@@ -43,10 +43,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.powerk.app.AppSpacing
 import com.powerk.app.NotificationItem
 import com.powerk.app.StripsViewModel
 import com.powerk.app.components.ConfirmDialog
 import com.powerk.app.components.EmptyState
+import com.powerk.app.components.Refreshable
 import com.powerk.app.components.SegTabs
 import com.powerk.app.components.Shimmer
 import com.powerk.app.components.ScreenHeader
@@ -57,45 +59,47 @@ import com.powerk.app.components.ago
 fun ActivityScreen(vm: StripsViewModel) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var confirmClear by rememberSaveable { mutableStateOf(false) }
-    LazyColumn(
-        Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 104.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        item(key = "header") {
-            ScreenHeader("Activity", if (vm.unread > 0) "${vm.unread} unread" else "All caught up", actions = {
-                if (tab == 0) {
-                    if (vm.unread > 0) IconButton(onClick = { vm.markAllRead() }) { Icon(Icons.Rounded.DoneAll, "Mark all read") }
-                    if (vm.notifications.isNotEmpty()) IconButton(onClick = { confirmClear = true }) { Icon(Icons.Rounded.DeleteSweep, "Delete all alerts") }
-                } else if (vm.events.isNotEmpty()) {
-                    IconButton(onClick = { confirmClear = true }) { Icon(Icons.Rounded.DeleteSweep, "Delete all logs") }
-                }
-            })
-        }
-        item(key = "tabs") {
-            SegTabs(listOf(if (vm.unread > 0) "Alerts (${vm.unread})" else "Alerts", "Log"), tab, { tab = it })
-            Spacer(Modifier.height(4.dp))
-        }
-        if (tab == 0) {
-            if (!vm.loaded) {
-                items(3, key = { "sk$it" }) { Shimmer(Modifier.fillMaxWidth().height(76.dp)) }
-            } else if (vm.notifications.isEmpty()) {
-                item(key = "empty") { EmptyState("No alerts", "Overloads, offline strips and schedule results show up here.") }
-            } else {
-                items(vm.notifications, key = { it.id }) { n -> Box(Modifier.animateItem()) { AlertRow(n, vm) } }
+    Refreshable(vm.refreshing, { vm.refresh() }, Modifier.fillMaxSize()) {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 104.dp),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.listGap),
+        ) {
+            item(key = "header") {
+                ScreenHeader("Activity", if (vm.unread > 0) "${vm.unread} unread" else "All caught up", actions = {
+                    if (tab == 0) {
+                        if (vm.unread > 0) IconButton(onClick = { vm.markAllRead() }) { Icon(Icons.Rounded.DoneAll, "Mark all read") }
+                        if (vm.notifications.isNotEmpty()) IconButton(onClick = { confirmClear = true }) { Icon(Icons.Rounded.DeleteSweep, "Delete all alerts") }
+                    } else if (vm.events.isNotEmpty()) {
+                        IconButton(onClick = { confirmClear = true }) { Icon(Icons.Rounded.DeleteSweep, "Delete all logs") }
+                    }
+                })
             }
-        } else {
-            if (vm.events.isEmpty()) {
-                item(key = "empty") { EmptyState("No activity yet", "Switching and automation events are listed here.") }
+            item(key = "tabs") {
+                SegTabs(listOf(if (vm.unread > 0) "Alerts (${vm.unread})" else "Alerts", "Log"), tab, { tab = it })
+                Spacer(Modifier.height(4.dp))
+            }
+            if (tab == 0) {
+                if (!vm.loaded) {
+                    items(3, key = { "sk$it" }) { Shimmer(Modifier.fillMaxWidth().height(76.dp)) }
+                } else if (vm.notifications.isEmpty()) {
+                    item(key = "empty") { EmptyState("No alerts", "Overloads, offline strips and schedule results show up here.") }
+                } else {
+                    items(vm.notifications, key = { it.id }) { n -> Box(Modifier.animateItem()) { AlertRow(n, vm) } }
+                }
             } else {
-                items(vm.events, key = { it.id }) { e ->
-                    VCard(Modifier.fillMaxWidth().animateItem(), padding = 12.dp) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text(e.message, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                Text(listOfNotNull(e.stripName, e.type).joinToString(" · "), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                if (vm.events.isEmpty()) {
+                    item(key = "empty") { EmptyState("No activity yet", "Switching and automation events are listed here.") }
+                } else {
+                    items(vm.events, key = { it.id }) { e ->
+                        VCard(Modifier.fillMaxWidth().animateItem(), padding = 12.dp) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(e.message, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    Text(listOfNotNull(e.stripName, e.type).joinToString(" · "), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                                }
+                                Text(ago(e.createdAt), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                            Text(ago(e.createdAt), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }

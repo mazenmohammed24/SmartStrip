@@ -6,7 +6,10 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.rounded.Fingerprint
 import androidx.compose.ui.draw.alpha
@@ -49,6 +52,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -158,12 +163,12 @@ private fun OutletLine(strip: Strip, o: Outlet, vm: StripsViewModel, onOpen: () 
 }
 
 @Composable
-private fun StripHead(strip: Strip, onEdit: () -> Unit, onOpen: () -> Unit) {
+private fun StripHead(strip: Strip, onEdit: () -> Unit, onOpen: () -> Unit, onRename: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
     Row(verticalAlignment = Alignment.CenterVertically) {
         IconBox(size = 36.dp, modifier = Modifier.tap(onClick = onEdit)) { Text(iconGlyph(strip.icon), fontSize = 17.sp) }
         Spacer(Modifier.width(9.dp))
-        Column(Modifier.weight(1f).tap(onClick = onEdit)) {
+        Column(Modifier.weight(1f).tap(onClick = onEdit, onLongClick = onRename)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(Privacy.name(strip), Modifier.weight(1f, fill = false), fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.width(4.dp))
@@ -191,9 +196,10 @@ fun StripCard(strip: Strip, vm: StripsViewModel, onOpen: () -> Unit, modifier: M
     val scheme = MaterialTheme.colorScheme
     var outletSheet by remember { mutableStateOf<Int?>(null) }
     var stripSheet by remember { mutableStateOf(false) }
+    var renaming by remember { mutableStateOf(false) }
     val onCount = strip.outlets.count { it.on }
     VCard(modifier, padding = 10.dp) {
-        StripHead(strip, onEdit = { stripSheet = true }, onOpen = onOpen)
+        StripHead(strip, onEdit = { stripSheet = true }, onOpen = onOpen, onRename = { renaming = true })
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(fmtW(strip.powerW), fontFamily = Mono, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = scheme.primary, maxLines = 1)
@@ -212,6 +218,7 @@ fun StripCard(strip: Strip, vm: StripsViewModel, onOpen: () -> Unit, modifier: M
     }
     outletSheet?.let { n -> OutletSheet(strip.mac, n, vm) { outletSheet = null } }
     if (stripSheet) StripSheet(strip.mac, vm, { stripSheet = false }, onOpen)
+    if (renaming) RenameDialog(strip.name, "Rename strip", { renaming = false }) { vm.renameStrip(strip.mac, it) }
 }
 
 @Composable
@@ -225,17 +232,41 @@ private fun SmallAction(text: String, enabled: Boolean, onClick: () -> Unit) {
     ) { Text(text, Modifier.padding(horizontal = 10.dp, vertical = 5.dp), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }
 }
 
+/**
+ * Minimised outlet control for collapsed strip rows: one small pill per outlet.
+ * Tap toggles the outlet, long-press opens the full outlet sheet.
+ */
+@Composable
+private fun OutletMiniPill(strip: Strip, o: Outlet, onClick: () -> Unit, onLongClick: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = if (o.on) capsuleFill() else scheme.surfaceContainer,
+        border = BorderStroke(1.dp, if (o.on) scheme.primary.copy(alpha = 0.32f) else scheme.outlineVariant),
+        modifier = Modifier
+            .alpha(if (strip.online) 1f else 0.45f)
+            .semantics { contentDescription = o.name }
+            .tap(enabled = strip.online, onLongClick = onLongClick, onClick = onClick),
+    ) {
+        Box(Modifier.height(30.dp).widthIn(min = 36.dp).padding(horizontal = 8.dp), contentAlignment = Alignment.Center) {
+            Text(iconGlyph(o.icon), fontSize = 14.sp)
+        }
+    }
+}
+
 @Composable
 fun StripRow(strip: Strip, vm: StripsViewModel, onOpen: () -> Unit, modifier: Modifier = Modifier) {
     val scheme = MaterialTheme.colorScheme
     var stripSheet by remember { mutableStateOf(false) }
+    var renaming by remember { mutableStateOf(false) }
+    var outletSheet by remember { mutableStateOf<Int?>(null) }
     val onCount = strip.outlets.count { it.on }
     VCard(modifier, onClick = onOpen, padding = 10.dp) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconBox(size = 36.dp, modifier = Modifier.tap(onClick = { stripSheet = true })) { Text(iconGlyph(strip.icon), fontSize = 17.sp) }
             Spacer(Modifier.width(9.dp))
             Column(Modifier.weight(1f)) {
-                Text(Privacy.name(strip), fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(Privacy.name(strip), Modifier.tap(onClick = onOpen, onLongClick = { renaming = true }), fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
                     if (strip.online) "$onCount/${strip.outlets.size} on · ${fmtW(strip.powerW)}" else "Offline",
                     fontSize = 11.sp, fontFamily = Mono, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -245,8 +276,26 @@ fun StripRow(strip: Strip, vm: StripsViewModel, onOpen: () -> Unit, modifier: Mo
             Spacer(Modifier.width(10.dp))
             MasterButton(strip.on, strip.online, { vm.command(strip.mac, 0, !strip.on) }, 34.dp)
         }
+        // Outlets stay controllable while the row is collapsed — a minimised strip of pills.
+        if (strip.outlets.isNotEmpty()) {
+            Spacer(Modifier.height(9.dp))
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                strip.outlets.forEach { o ->
+                    OutletMiniPill(
+                        strip, o,
+                        onClick = { vm.command(strip.mac, o.n, !o.on) },
+                        onLongClick = { outletSheet = o.n },
+                    )
+                }
+            }
+        }
     }
+    outletSheet?.let { n -> OutletSheet(strip.mac, n, vm) { outletSheet = null } }
     if (stripSheet) StripSheet(strip.mac, vm, { stripSheet = false }, onOpen)
+    if (renaming) RenameDialog(strip.name, "Rename strip", { renaming = false }) { vm.renameStrip(strip.mac, it) }
 }
 @Composable
 fun RowScope.Stat(label: String, value: String) {

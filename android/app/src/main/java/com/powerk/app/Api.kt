@@ -50,7 +50,7 @@ data class Strip(
 
 data class RelayTimer(val stripId: String, val relayIndex: Int, val mode: String, val state: String, val restoreAtMs: Long)
 data class DiscoveredStrip(val driverStripId: String, val model: String, val suggestedName: String, val ipAddress: String?, val relayCount: Int)
-data class ProvisionResult(val registered: Boolean, val stripName: String?, val message: String)
+data class ProvisionResult(val registered: Boolean, val stripName: String?, val message: String, val pending: Boolean = false)
 data class ServerAddress(val host: String, val ip: String)
 data class PowerSummary(val todayKwh: Double, val todayCost: Double, val currency: String, val liveWatts: Double)
 data class DayEnergy(val date: String, val kwh: Double, val cost: Double)
@@ -445,25 +445,59 @@ object Api {
         }
     }
 
-    suspend fun waitForRegistration(base: String, token: String): ProvisionResult = withContext(Dispatchers.IO) {
-        val discovered = waitForDiscoveredStrip(base, token)
-        val strip = discovered.firstOrNull()
-            ?: return@withContext ProvisionResult(
-                registered = false,
-                stripName = null,
-                message = "Wi-Fi was sent, but the strip did not appear on the server yet. Keep the server reachable and scan again in a minute.",
-            )
-
-        val body = JSONObject()
-            .put("driverStripId", strip.driverStripId)
-            .put("model", strip.model)
-            .put("relayCount", strip.relayCount)
-            .put("ipAddress", strip.ipAddress)
-            .put("suggestedName", strip.suggestedName)
-            .put("name", strip.suggestedName)
-            .toString()
-        request("$base/api/strips", body, token)
-        ProvisionResult(true, strip.suggestedName, "${strip.suggestedName} is provisioned and registered on your SmartStrip server.")
+    /**
+     * Waits for a freshly provisioned strip to land on the server. Two independent signals are
+     * checked every cycle, because either can fire first:
+     *  - the strip registers itself the moment it joins the Wi-Fi network; this is detected by
+     *    diffing the live strip list against [baselineStripIds] (captured before connecting);
+     *  - a server-side discovery scan finds it, in which case it is adopted explicitly.
+     */
+    suspend fun waitForRegistration(base: String, token: String, baselineStripIds: Set<String>? = null): ProvisionResult = withContext(Dispatchers.IO) {
+        val deadline = System.currentTimeMillis() + 120_000L
+        while (System.currentTimeMillis() < deadline) {
+            // Signal 1: the server already lists a strip we did not know about before setup.
+            if (baselineStripIds != null) {
+                val ids = runCatching { snapshot(base, token).map { it.mac }.toSet() }.getOrNull()
+                if (ids != null && (ids - baselineStripIds).isNotEmpty()) {
+                    return@withContext ProvisionResult(
+                        registered = true,
+                        stripName = null,
+                        message = "The strip is online and registered on your SmartStrip server.",
+                    )
+                }
+            }
+            // Signal 2: a discovery scan finds it on the network — adopt it explicitly.
+            val found = scanOnceForStrip(base, token)
+            if (found.isNotEmpty()) {
+                val strip = found.first()
+                val body = JSONObject()
+                    .put("driverStripId", strip.driverStripId)
+                    .put("model", strip.model)
+                    .put("relayCount", strip.relayCount)
+                    .put("ipAddress", strip.ipAddress)
+                    .put("suggestedName", strip.suggestedName)
+                    .put("name", strip.suggestedName)
+                    .toString()
+                // The server may have auto-registered it already, so a failed adopt is not fatal:
+                // when the strip is reachable, report success with an honest message.
+                val adopted = runCatching { request("$base/api/strips", body, token) }.isSuccess
+                return@withContext ProvisionResult(
+                    registered = true,
+                    stripName = strip.suggestedName,
+                    message = if (adopted) {
+                        "${strip.suggestedName} is provisioned and registered on your SmartStrip server."
+                    } else {
+                        "Strip found on the network. It is finishing registration and will appear on the dashboard shortly."
+                    },
+                )
+            }
+        }
+        ProvisionResult(
+            registered = false,
+            stripName = null,
+            message = "Wi-Fi was sent and the strip is rebooting. It hasn't appeared on the server yet — it shows up on the dashboard automatically as soon as it registers.",
+            pending = true,
+        )
     }
 
     /**
@@ -634,31 +668,26 @@ object Api {
             outlets = outlets,
         )
     }
-    private suspend fun waitForDiscoveredStrip(base: String, token: String): List<DiscoveredStrip> {
-        // Treat each attempt as retryable, not fatal: the phone briefly has no DNS/routing right
-        // after leaving the strip's AP, which used to throw a raw UnknownHostException here.
-        repeat(12) {
-            val scanId = runCatching {
-                JSONObject(request("$base/api/strips/scan", "{}", token)).optString("scanId")
-            }.getOrNull()
-            if (scanId.isNullOrBlank()) {
-                delay(1000)
-                return@repeat
+    /** One server-side discovery scan (POST + poll). Empty when nothing was found this round. */
+    private suspend fun scanOnceForStrip(base: String, token: String): List<DiscoveredStrip> {
+        // Each attempt is retryable, not fatal: the phone briefly has no DNS/routing right after
+        // leaving the strip's AP, which used to throw a raw UnknownHostException here.
+        val scanId = runCatching {
+            JSONObject(request("$base/api/strips/scan", "{}", token)).optString("scanId")
+        }.getOrNull()
+        if (scanId.isNullOrBlank()) {
+            delay(1000)
+            return emptyList()
+        }
+        for (poll in 1..10) {
+            delay(1000)
+            val record = runCatching { JSONObject(request("$base/api/strips/scan/$scanId", null, token)) }
+                .getOrNull() ?: continue
+            when (record.optString("status")) {
+                // An empty "done" scan can finish just before the strip connects, so keep waiting.
+                "done" -> return parseDiscovered(record)
+                "error" -> return emptyList()
             }
-            for (poll in 1..8) {
-                delay(1000)
-                val record = runCatching { JSONObject(request("$base/api/strips/scan/$scanId", null, token)) }
-                    .getOrNull() ?: continue
-                val status = record.optString("status")
-                // An empty "done" scan can finish just before the strip connects, so scan again.
-                if (status == "done") {
-                    val found = parseDiscovered(record)
-                    if (found.isNotEmpty()) return found
-                    break
-                }
-                if (status == "error") break
-            }
-            delay(2000)
         }
         return emptyList()
     }

@@ -40,6 +40,7 @@ import com.powerk.app.Api
 import com.powerk.app.DiscoveredStrip
 import com.powerk.app.R
 import com.powerk.app.Server
+import com.powerk.app.components.BrandScanRadar
 import com.powerk.app.components.EmptyState
 import com.powerk.app.components.MessageCard
 import com.powerk.app.components.MetricPill
@@ -92,7 +93,12 @@ fun ScanScreen(onStripAdopted: () -> Unit) {
         }
         if (scanning) {
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(
+                    Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    BrandScanRadar(scanning = true)
                     LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
                     Text(stringResource(R.string.scan_in_progress), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }

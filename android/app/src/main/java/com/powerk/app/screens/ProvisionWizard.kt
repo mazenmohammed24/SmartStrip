@@ -3,8 +3,15 @@ package com.powerk.app.screens
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -22,8 +29,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
@@ -75,7 +82,9 @@ import com.powerk.app.Server
 import com.powerk.app.StripApType
 import com.powerk.app.WifiHelper
 import com.powerk.app.WifiScanResult
+import com.powerk.app.components.BrandScanRadar
 import com.powerk.app.components.ProvisionWizardSteps
+import com.powerk.app.components.tap
 
 
 /** Draws a Wi-Fi arc icon with 1–3 arcs lit based on [rssi] (dBm), matching Android's signal levels. */
@@ -115,7 +124,7 @@ private fun WifiStrengthIcon(rssi: Int, modifier: Modifier = Modifier) {
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun ProvisionWizardPanel(provisionVm: ProvisionViewModel = viewModel()) {
+fun ProvisionWizardPanel(provisionVm: ProvisionViewModel = viewModel(), onDone: () -> Unit = {}) {
     val isStandalone = provisionVm.selectedStrip?.type == StripApType.STANDALONE
 
     val scope = rememberCoroutineScope()
@@ -161,6 +170,16 @@ fun ProvisionWizardPanel(provisionVm: ProvisionViewModel = viewModel()) {
     fun resetWizard() = provisionVm.resetWizard()
 
     fun attemptConnectAndSend() = provisionVm.attemptConnectAndSend()
+
+    // Step-3 retry: drop the previous AP binding and run connect+send again with the entered data.
+    fun retrySetup() {
+        provisionVm.connectAttempted = false
+        provisionVm.reconnecting = false
+        WifiHelper.releaseStripNetwork(context)
+        provisionVm.boundStripNetwork = null
+        provisionVm.provisionStep = 1
+        attemptConnectAndSend()
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (!provisionVm.showWizard) {
@@ -274,7 +293,6 @@ fun ProvisionWizardPanel(provisionVm: ProvisionViewModel = viewModel()) {
                             Spacer(Modifier.width(8.dp))
                             Text(stringResource(R.string.provision_step_1_action))
                         }
-                        if (provisionVm.scanning || provisionVm.connectingAp || provisionVm.reconnecting) CircularWavyProgressIndicator(Modifier.fillMaxWidth())
                         if (provisionVm.reconnecting) {
                             Surface(
                                 shape = MaterialTheme.shapes.small,
@@ -289,34 +307,36 @@ fun ProvisionWizardPanel(provisionVm: ProvisionViewModel = viewModel()) {
                                 )
                             }
                         }
-                        Text(
-                            stringResource(R.string.provision_step_1_found, provisionVm.stripNetworks.size),
-                            style = MaterialTheme.typography.bodySmall,
+                        // The app mark doubles as the scan radar: rings pulse out of the icon
+                        // while Android searches for strip setup access points.
+                        val scanningNow = provisionVm.scanning || provisionVm.connectingAp || provisionVm.reconnecting
+                        BrandScanRadar(
+                            scanning = scanningNow,
+                            modifier = Modifier.fillMaxWidth(),
+                            caption = when {
+                                provisionVm.connectingAp -> stringResource(R.string.provision_connecting_strip, provisionVm.selectedStrip?.ssid.orEmpty())
+                                scanningNow -> stringResource(R.string.provision_scanning)
+                                provisionVm.stripNetworks.isNotEmpty() -> stringResource(R.string.provision_step_1_found, provisionVm.stripNetworks.size)
+                                else -> null
+                            },
                         )
-                        provisionVm.stripNetworks.forEach { network ->
-                            val isStandaloneNet = network.type == StripApType.STANDALONE
-                            val typeTag = if (isStandaloneNet) "standalone" else "stock"
-                            val selected = provisionVm.selectedStrip?.ssid == network.ssid
-                            OutlinedButton(
-                                onClick = {
-                                    provisionVm.selectedStrip = network
-                                    provisionVm.connectAttempted = false
-                                    provisionVm.provisionStatus = null
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                WifiStrengthIcon(network.rssi, modifier = Modifier.size(22.dp))
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    (if (selected) "✓  " else "") + network.ssid,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    typeTag,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
+                        AnimatedVisibility(
+                            visible = provisionVm.stripNetworks.isNotEmpty(),
+                            enter = fadeIn(tween(200)) + expandVertically(tween(260)),
+                            exit = fadeOut(tween(120)),
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                provisionVm.stripNetworks.forEach { network ->
+                                    NetworkCard(
+                                        network = network,
+                                        selected = provisionVm.selectedStrip?.ssid == network.ssid,
+                                        onSelect = {
+                                            provisionVm.selectedStrip = network
+                                            provisionVm.connectAttempted = false
+                                            provisionVm.provisionStatus = null
+                                        },
+                                    )
+                                }
                             }
                         }
                         // Firmware type info banner for the selected strip
@@ -359,16 +379,32 @@ fun ProvisionWizardPanel(provisionVm: ProvisionViewModel = viewModel()) {
 
                     // Step 2: Sending / waiting
                     else if (provisionVm.provisionStep == 2) {
-                        if (provisionVm.provisionBusy) CircularWavyProgressIndicator(Modifier.fillMaxWidth())
+                        if (provisionVm.provisionBusy) {
+                            BrandScanRadar(
+                                scanning = true,
+                                modifier = Modifier.fillMaxWidth(),
+                                caption = provisionVm.provisionStatus ?: stringResource(R.string.provision_sending),
+                            )
+                        }
                     }
 
                     // Step 3: Done
                     else {
                         provisionVm.provisionStatus?.let { msg ->
+                            val ok = provisionVm.provisionOk
+                            val pending = provisionVm.provisionPending
                             Surface(
                                 shape = MaterialTheme.shapes.medium,
-                                color = if (provisionVm.provisionOk) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer,
-                                contentColor = if (provisionVm.provisionOk) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer,
+                                color = when {
+                                    ok -> MaterialTheme.colorScheme.primaryContainer
+                                    pending -> MaterialTheme.colorScheme.tertiaryContainer
+                                    else -> MaterialTheme.colorScheme.errorContainer
+                                },
+                                contentColor = when {
+                                    ok -> MaterialTheme.colorScheme.onPrimaryContainer
+                                    pending -> MaterialTheme.colorScheme.onTertiaryContainer
+                                    else -> MaterialTheme.colorScheme.onErrorContainer
+                                },
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
                                 Text(msg, Modifier.padding(14.dp), style = MaterialTheme.typography.bodyMedium)
@@ -385,24 +421,26 @@ fun ProvisionWizardPanel(provisionVm: ProvisionViewModel = viewModel()) {
                             ) { Text("Open strip web UI (http://$ip)") }
                         }
                         if (!provisionVm.provisionBusy) {
-                            // On failure, keep entered data so the user can just retry instead of starting over.
-                            if (!provisionVm.provisionOk) {
-                                Button(
-                                    onClick = {
-                                        provisionVm.connectAttempted = false
-                                        provisionVm.reconnecting = false
-                                        WifiHelper.releaseStripNetwork(context)
-                                        provisionVm.boundStripNetwork = null
-                                        provisionVm.provisionStep = 1
-                                        attemptConnectAndSend()
-                                    },
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) { Text(stringResource(R.string.provision_retry)) }
+                            if (provisionVm.provisionPending) {
+                                // Wi-Fi was accepted and the strip is rebooting — the healthy outcome.
+                                // Done leaves the wizard and closes the sheet; Retry stays for stragglers.
+                                Button(onClick = { resetWizard(); onDone() }, modifier = Modifier.fillMaxWidth()) {
+                                    Text(stringResource(R.string.provision_done))
+                                }
+                                OutlinedButton(onClick = { retrySetup() }, modifier = Modifier.fillMaxWidth()) {
+                                    Text(stringResource(R.string.provision_retry))
+                                }
+                            } else {
+                                // On failure, keep entered data so the user can just retry instead of starting over.
+                                if (!provisionVm.provisionOk) {
+                                    Button(onClick = { retrySetup() }, modifier = Modifier.fillMaxWidth()) {
+                                        Text(stringResource(R.string.provision_retry))
+                                    }
+                                }
+                                OutlinedButton(onClick = { resetWizard(); onDone() }, modifier = Modifier.fillMaxWidth()) {
+                                    Text(stringResource(R.string.provision_done))
+                                }
                             }
-                            OutlinedButton(
-                                onClick = { resetWizard() },
-                                modifier = Modifier.fillMaxWidth(),
-                            ) { Text(stringResource(R.string.provision_done)) }
                         }
                     }
 
@@ -423,5 +461,51 @@ fun ProvisionWizardPanel(provisionVm: ProvisionViewModel = viewModel()) {
                         }
                     }
                 }
+    }
+}
+
+/** Selectable strip access point, animated between unselected and selected states. */
+@Composable
+private fun NetworkCard(network: WifiScanResult, selected: Boolean, onSelect: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    val standalone = network.type == StripApType.STANDALONE
+    val bg by animateColorAsState(
+        if (selected) scheme.primaryContainer.copy(alpha = 0.55f) else scheme.surfaceContainerLow,
+        tween(180),
+        label = "netBg",
+    )
+    val edge by animateColorAsState(
+        if (selected) scheme.primary.copy(alpha = 0.55f) else scheme.outlineVariant,
+        tween(180),
+        label = "netEdge",
+    )
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = bg,
+        border = BorderStroke(1.dp, edge),
+        modifier = Modifier.fillMaxWidth().tap(onClick = onSelect),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            WifiStrengthIcon(network.rssi, modifier = Modifier.size(22.dp))
+            Column(Modifier.weight(1f)) {
+                Text(network.ssid, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                Text(
+                    if (standalone) "Standalone setup AP" else "Stock setup AP",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = scheme.onSurfaceVariant,
+                )
+            }
+            AnimatedVisibility(
+                visible = selected,
+                enter = fadeIn(tween(140)) + scaleIn(spring(dampingRatio = 0.55f, stiffness = 500f), initialScale = 0.6f),
+                exit = fadeOut(tween(100)) + scaleOut(tween(120)),
+            ) {
+                Icon(Icons.Rounded.CheckCircle, "Selected", Modifier.size(20.dp), tint = scheme.primary)
+            }
+        }
     }
 }
